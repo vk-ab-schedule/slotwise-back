@@ -11,6 +11,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.NoArgsConstructor;
+
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.Objects;
 
@@ -35,6 +37,7 @@ public class RoomEquipmentEntity {
     @Setter
     @NoArgsConstructor
     public static class Key implements Serializable {
+        @Serial
         private static final long serialVersionUID = 1L;
         private Long roomId;
         private Long equipmentId;

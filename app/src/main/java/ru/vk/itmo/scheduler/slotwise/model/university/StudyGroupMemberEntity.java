@@ -11,6 +11,7 @@ import lombok.Setter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.DynamicInsert;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.Objects;
 
@@ -35,6 +36,7 @@ public class StudyGroupMemberEntity {
     @Setter
     @NoArgsConstructor
     public static class Key implements Serializable {
+        @Serial
         private static final long serialVersionUID = 1L;
         private Long studyGroupId;
         private Long accountId;
