@@ -1,9 +1,11 @@
+name: slotwise
+
 services:
   postgres:
     image: 'postgres:18'
     environment:
-      - 'POSTGRES_DB=mydatabase'
-      - 'POSTGRES_PASSWORD=secret'
-      - 'POSTGRES_USER=myuser'
+      - 'POSTGRES_DB=slotwise'
+      - 'POSTGRES_PASSWORD=slotwise'
+      - 'POSTGRES_USER=slotwise'
     ports:
       - '5432'
