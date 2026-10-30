@@ -81,6 +81,14 @@ Java 25, Lombok, JUnit 5 и AssertJ подключаются плагином. �
 - **Версия PostgreSQL** — 18: в `app/compose.yaml`, в Testcontainers и на стенде.
 - **Подключиться к локальной БД** клиентом: порт выбирается случайно, его показывает `docker ps` (контейнер `slotwise-postgres-1`). Логин, пароль и база — `slotwise`.
 
+## Непрерывная интеграция
+
+GitHub Actions запускает проверку `Backend tests` для каждого PR, после push в `main` и `sprint/*`, а также вручную через Actions. Команда `./gradlew check --no-daemon --stacktrace` запускает тесты всех модулей и `verifyNoSpring`; PostgreSQL для тестов поднимает Testcontainers на runner. JDK — Temurin 25.
+
+JUnit XML и HTML-отчёты сохраняются в артефакте `backend-test-reports` на 7 дней, в том числе при падении тестов. Сборка Docker-образов и деплой пока не настроены.
+
+Для merge требуется одно одобрение от `@vk-ab-schedule/dream-team` после включения правил защиты веток. Инструкция: [GITHUB_SETUP.md](https://github.com/vk-ab-schedule/slotwise-doc/blob/main/GITHUB_SETUP.md).
+
 ## Сборка для деплоя
 
 ```bash
