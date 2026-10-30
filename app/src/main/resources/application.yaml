@@ -1,3 +1,16 @@
 spring:
   application:
     name: slotwise-back
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: slotwise
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    default-schema: slotwise
+    schemas: slotwise
