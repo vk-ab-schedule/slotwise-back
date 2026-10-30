@@ -87,7 +87,7 @@ GitHub Actions запускает проверку `Backend tests` для каж
 
 JUnit XML и HTML-отчёты сохраняются в артефакте `backend-test-reports` на 7 дней, в том числе при падении тестов. Сборка Docker-образов и деплой пока не настроены.
 
-Для merge требуется одно одобрение от `@vk-ab-schedule/dream-team` после включения правил защиты веток. Инструкция: [GITHUB_SETUP.md](https://github.com/vk-ab-schedule/slotwise-doc/blob/main/GITHUB_SETUP.md).
+Для merge нужен один апрув от `@vk-ab-schedule/dream-team`. Это требование включается в правилах защиты веток GitHub.
 
 ## Сборка для деплоя
 
@@ -111,6 +111,6 @@ JUnit XML и HTML-отчёты сохраняются в артефакте `bac
 
 1. Ветка `feature/<issue>-<кратко>` от текущей `sprint/N`.
 2. Коммиты в формате Conventional Commits.
-3. PR в `sprint/N` с `Closes #N`, зелёный CI, одобрение второго бэкендера.
+3. PR в `sprint/N` с `Closes #N`, зелёный CI, апрув участника Dream team.
 
 Подробности — в [DEVELOPMENT.md](https://github.com/vk-ab-schedule/slotwise-doc/blob/main/DEVELOPMENT.md).
