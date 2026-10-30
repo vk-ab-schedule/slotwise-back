@@ -83,9 +83,9 @@ Java 25, Lombok, JUnit 5 и AssertJ подключаются плагином. �
 
 ## Непрерывная интеграция
 
-GitHub Actions запускает проверку `Backend tests` для каждого PR, после push в `main` и `sprint/*`, а также вручную через Actions. Команда `./gradlew check --no-daemon --stacktrace` запускает тесты всех модулей и `verifyNoSpring`; PostgreSQL для тестов поднимает Testcontainers на runner. JDK — Temurin 25.
+GitHub Actions запускает проверку `Gradle build` для каждого PR, после push в `main` и `sprint/*`, а также вручную через Actions. Команда `./gradlew build --no-daemon --stacktrace --console=plain` собирает все модули, запускает тесты и `verifyNoSpring`; PostgreSQL для тестов поднимает Testcontainers на runner. JDK — Temurin 25.
 
-JUnit XML и HTML-отчёты сохраняются в артефакте `backend-test-reports` на 7 дней, в том числе при падении тестов. Сборка Docker-образов и деплой пока не настроены.
+JUnit XML и HTML-отчёты сохраняются в артефакте `test-reports` на 7 дней, в том числе при падении тестов. Сборка Docker-образов и деплой пока не настроены.
 
 Для merge нужен один апрув от `@vk-ab-schedule/dream-team`. Это требование включается в правилах защиты веток GitHub.
 
