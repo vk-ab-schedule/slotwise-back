@@ -28,6 +28,12 @@ Spring Boot сервис оптимизатора расписания SlotWise:
 
 Запускает приложение на <http://localhost:8080>. При старте Spring сам поднимает PostgreSQL из `app/compose.yaml` и останавливает его при выходе. Миграции Flyway применяются при старте.
 
+Чтобы войти, при первом запуске задайте администратора (подробнее — в разделе «Сборка для деплоя»):
+
+```bash
+SLOTWISE_ADMIN_EMAIL=admin@example.org SLOTWISE_ADMIN_PASSWORD=admin-password ./gradlew :app:bootRun
+```
+
 После запуска:
 
 | Адрес | Что это |
@@ -35,6 +41,8 @@ Spring Boot сервис оптимизатора расписания SlotWise:
 | <http://localhost:8080/swagger-ui.html> | Swagger UI |
 | <http://localhost:8080/v3/api-docs> | Спецификация OpenAPI (по ней фронтенд генерирует типы) |
 | <http://localhost:8080/actuator/health> | Health-check |
+
+Без входа доступны только эти адреса и `POST /api/auth/login`. Вход — через серверную сессию в cookie, изменяющие запросы требуют CSRF-токен: его значение из cookie `XSRF-TOKEN` передаётся в заголовке `X-XSRF-TOKEN`.
 
 ### Запуск из IntelliJ IDEA
 
@@ -105,7 +113,17 @@ JUnit XML и HTML-отчёты сохраняются в артефакте `tes
 | `SPRING_DATASOURCE_USERNAME` | `slotwise` |
 | `SPRING_DATASOURCE_PASSWORD` | — |
 
-Переменные для первого администратора появятся вместе с авторизацией.
+Первый администратор создаётся при старте, если администраторов в базе ещё нет:
+
+| Переменная | Что это |
+| --- | --- |
+| `SLOTWISE_ADMIN_EMAIL` | Email первого администратора |
+| `SLOTWISE_ADMIN_PASSWORD` | Пароль, не короче 8 символов; хэшируется при старте |
+| `SLOTWISE_ADMIN_FIRST_NAME`, `SLOTWISE_ADMIN_LAST_NAME` | Необязательно: имя и фамилия, по умолчанию «Администратор SlotWise» |
+
+Если администратор уже есть, переменные ни на что не влияют, их можно не убирать. Пароль потом меняется в интерфейсе.
+
+Reverse proxy должен передавать `X-Forwarded-Proto`: по нему бэкенд понимает, что запрос пришёл по HTTPS, и ставит cookie флаг `Secure`.
 
 ## Как вносить изменения
 
