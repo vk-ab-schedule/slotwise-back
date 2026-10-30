@@ -12,8 +12,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
-import ru.vk.itmo.scheduler.slotwise.model.planning.SessionRuleEntity;
-import ru.vk.itmo.scheduler.slotwise.model.schedule.AssignmentEntity;
+import ru.vk.itmo.scheduler.slotwise.planning.SessionRuleEntity;
+import ru.vk.itmo.scheduler.slotwise.schedule.AssignmentEntity;
+import ru.vk.itmo.scheduler.slotwise.solving.InputSnapshotEntity;
 
 import java.time.Instant;
 
@@ -125,11 +126,11 @@ class PersistenceRegressionTests {
     @Transactional
     void persistsImmutableSnapshotWithFactory() {
         long session = new StorageFixtures(jdbc).session();
-        var snapshot = ru.vk.itmo.scheduler.slotwise.model.solving.InputSnapshotEntity.create(session, 0, "{}");
+        var snapshot = InputSnapshotEntity.create(session, 0, "{}");
         em.persist(snapshot);
         em.flush();
         em.clear();
-        var loaded = em.find(ru.vk.itmo.scheduler.slotwise.model.solving.InputSnapshotEntity.class, snapshot.getId());
+        var loaded = em.find(InputSnapshotEntity.class, snapshot.getId());
         assertEquals(session, loaded.getPlanningSessionId());
         assertEquals(0L, loaded.getInputVersion());
         assertEquals("{}", loaded.getProblem());
