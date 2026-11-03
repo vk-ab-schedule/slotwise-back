@@ -3,8 +3,9 @@ package ru.vk.itmo.scheduler.slotwise.storage;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -23,7 +24,7 @@ class StorageSchemaTests {
                 """, Long.class);
         assertNotNull(id);
         try {
-            assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> jdbc.update("""
+            assertThrows(DataIntegrityViolationException.class, () -> jdbc.update("""
                     insert into slotwise.account(email, first_name, last_name, role)
                     values ('SCHEMA-TEST@example.org', 'Пётр', 'Петров', 'TEACHER')
                     """));
@@ -42,7 +43,7 @@ class StorageSchemaTests {
                 select count(*) from information_schema.tables
                 where table_schema='public' and table_name in ('account','event','assignment')
                 """, Integer.class));
-        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> jdbc.update("""
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update("""
                 insert into slotwise.account(email, first_name, last_name, role)
                 values ('invalid-role@example.org', 'Иван', 'Иванов', 'SUPERUSER')
                 """));

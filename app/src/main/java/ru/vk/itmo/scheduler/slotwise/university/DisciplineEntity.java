@@ -1,45 +1,32 @@
 package ru.vk.itmo.scheduler.slotwise.university;
 
-import org.hibernate.annotations.Generated;
-import org.hibernate.generator.EventType;
-
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-import jakarta.persistence.Version;
+import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.hibernate.annotations.DynamicInsert;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 @Entity
 @Getter
 @Setter
 @DynamicInsert
-@Table(name = "discipline", schema = "slotwise")
+@Table(name = "discipline")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class DisciplineEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id")
     private Long id;
 
-    @Column(name = "external_id", length = 255)
     private String externalId;
-
-    @Column(name = "name", length = 255)
     private String name;
 
     @Generated(event = EventType.INSERT, writable = true)
-    @Column(name = "active")
     private Boolean active;
 
     @Version
-    @Column(name = "version")
     private Long version;
 }

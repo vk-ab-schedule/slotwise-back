@@ -1,67 +1,47 @@
 package ru.vk.itmo.scheduler.slotwise.eventtype;
 
-import org.hibernate.annotations.Generated;
-import org.hibernate.generator.EventType;
-
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-import jakarta.persistence.Version;
+import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.hibernate.annotations.DynamicInsert;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 @Entity
 @Getter
 @Setter
 @DynamicInsert
-@Table(name = "event_type", schema = "slotwise")
+@Table(name = "event_type")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class EventTypeEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id")
     private Long id;
 
-    @Column(name = "name", length = 255)
     private String name;
-
-    @Column(name = "default_duration_minutes")
     private Integer defaultDurationMinutes;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "granularity", length = 16)
     private EventGranularity granularity;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "default_format", length = 16)
     private EventFormat defaultFormat;
 
     @Generated(event = EventType.INSERT, writable = true)
-    @Column(name = "commission_size")
     private Integer commissionSize;
 
     @Generated(event = EventType.INSERT, writable = true)
-    @Column(name = "requires_chair")
     private Boolean requiresChair;
 
     @Generated(event = EventType.INSERT, writable = true)
-    @Column(name = "preparation_days")
     private Integer preparationDays;
 
     @Generated(event = EventType.INSERT, writable = true)
-    @Column(name = "active")
     private Boolean active;
 
     @Version
-    @Column(name = "version")
     private Long version;
 }

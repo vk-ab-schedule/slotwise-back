@@ -1,18 +1,10 @@
 package ru.vk.itmo.scheduler.slotwise.planning;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-import jakarta.persistence.Version;
+import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.hibernate.annotations.DynamicInsert;
 
 import java.time.Instant;
@@ -21,32 +13,22 @@ import java.time.Instant;
 @Getter
 @Setter
 @DynamicInsert
-@Table(name = "busy_interval", schema = "slotwise")
+@Table(name = "busy_interval")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class BusyIntervalEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id")
     private Long id;
 
-    @Column(name = "planning_session_id")
     private Long planningSessionId;
-
-    @Column(name = "account_id")
     private Long accountId;
-
-    @Column(name = "starts_at")
     private Instant startsAt;
-
-    @Column(name = "ends_at")
     private Instant endsAt;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "importance", length = 16)
     private BusyImportance importance;
 
     @Version
-    @Column(name = "version")
     private Long version;
 }
