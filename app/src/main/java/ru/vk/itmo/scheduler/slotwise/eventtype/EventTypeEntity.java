@@ -54,6 +54,10 @@ public class EventTypeEntity {
     private Boolean requiresChair;
 
     @Generated(event = EventType.INSERT, writable = true)
+    @Column(name = "preparation_days")
+    private Integer preparationDays;
+
+    @Generated(event = EventType.INSERT, writable = true)
     @Column(name = "active")
     private Boolean active;
 

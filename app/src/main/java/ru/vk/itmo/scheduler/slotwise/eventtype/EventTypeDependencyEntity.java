@@ -35,6 +35,9 @@ public class EventTypeDependencyEntity {
     @Column(name = "min_gap_days")
     private Integer minGapDays;
 
+    @Column(name = "max_gap_days")
+    private Integer maxGapDays;
+
     @Getter
     @Setter
     @NoArgsConstructor
