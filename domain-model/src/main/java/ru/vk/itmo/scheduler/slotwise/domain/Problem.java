@@ -1,17 +1,20 @@
 package ru.vk.itmo.scheduler.slotwise.domain;
 
+import lombok.AccessLevel;
 import lombok.Builder;
+import lombok.Getter;
+import lombok.NonNull;
 import lombok.Singular;
+import lombok.experimental.Accessors;
 
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Immutable snapshot of a planning session that a solver works on (MODEL.md, «Входные данные солвера»).
@@ -20,11 +23,9 @@ import java.util.function.Function;
  * or events and duplicate ids are rejected. It does not check the hard constraints, that is the
  * validator's job: a problem may be unsolvable, and pinned assignments may already violate them.
  * All collections are sorted by id, so every solver sees the same order on every run.
- *
- * @param roomChangeBuffer slots a participant needs between onsite events in different rooms (H2)
- * @param pinned           assignments the solver must keep as they are (H9)
- * @param baseline         previous schedule for rescheduling, moves against it are penalised (S5)
  */
+@Getter
+@Accessors(fluent = true)
 public final class Problem {
     private final TimeGrid grid;
     private final List<Person> people;
@@ -32,18 +33,25 @@ public final class Problem {
     private final List<CommissionCandidate> commissionPool;
     private final List<Event> events;
     private final List<Dependency> dependencies;
+    /** Assignments the solver must keep as they are (H9). */
     private final List<Assignment> pinned;
+    /** Previous schedule for rescheduling, moves against it are penalised (S5). */
     private final List<Assignment> baseline;
+    /** Slots a participant needs between onsite events in different rooms (H2). */
     private final int roomChangeBuffer;
     private final Weights weights;
 
+    @Getter(AccessLevel.NONE)
     private final Map<Long, Person> peopleById;
+    @Getter(AccessLevel.NONE)
     private final Map<Long, Room> roomsById;
+    @Getter(AccessLevel.NONE)
     private final Map<Long, Event> eventsById;
+    @Getter(AccessLevel.NONE)
     private final Map<Long, Assignment> pinnedByEvent;
 
     @Builder(toBuilder = true)
-    public Problem(TimeGrid grid,
+    public Problem(@NonNull TimeGrid grid,
                    @Singular("person") List<Person> people,
                    @Singular List<Room> rooms,
                    @Singular("commissionCandidate") List<CommissionCandidate> commissionPool,
@@ -52,12 +60,12 @@ public final class Problem {
                    @Singular("pin") List<Assignment> pinned,
                    @Singular("baselineAssignment") List<Assignment> baseline,
                    int roomChangeBuffer,
-                   Weights weights) {
-        this.grid = Objects.requireNonNull(grid, "grid");
-        this.weights = Objects.requireNonNull(weights, "weights");
+                   @NonNull Weights weights) {
         if (roomChangeBuffer < 0) {
             throw new IllegalArgumentException("Room change buffer must not be negative: " + roomChangeBuffer);
         }
+        this.grid = grid;
+        this.weights = weights;
         this.roomChangeBuffer = roomChangeBuffer;
 
         this.people = sorted(people, Person::id, "people");
@@ -68,12 +76,10 @@ public final class Problem {
         this.roomsById = index(this.rooms, Room::id);
         this.eventsById = index(this.events, Event::id);
 
-        for (Person person : this.people) {
-            person.busy().forEach(busy -> requireInGrid(busy.range(), "busy time of person " + person.id()));
-        }
-        for (Room room : this.rooms) {
-            room.busy().forEach(busy -> requireInGrid(busy, "busy time of room " + room.id()));
-        }
+        this.people.forEach(person -> person.busy()
+                .forEach(busy -> requireInGrid(busy.range(), "busy time of person " + person.id())));
+        this.rooms.forEach(room -> room.busy()
+                .forEach(busy -> requireInGrid(busy, "busy time of room " + room.id())));
         for (CommissionCandidate candidate : this.commissionPool) {
             if (person(candidate.personId()).role() != Person.Role.TEACHER) {
                 throw new IllegalArgumentException("Commission candidate " + candidate.personId() + " is not a teacher");
@@ -83,8 +89,8 @@ public final class Problem {
             if (event.duration() > grid.slotCount()) {
                 throw new IllegalArgumentException("Event " + event.id() + " is longer than the grid");
             }
-            event.participants().forEach(id -> requirePerson(id, "participant of event " + event.id()));
-            event.commissionExcluded().forEach(id -> requirePerson(id, "commission exclusion of event " + event.id()));
+            event.participants().forEach(this::person);
+            event.commissionExcluded().forEach(this::person);
         }
 
         this.dependencies = dependencies.stream()
@@ -92,8 +98,8 @@ public final class Problem {
                 .toList();
         Set<List<Long>> pairs = new HashSet<>();
         for (Dependency dependency : this.dependencies) {
-            requireEvent(dependency.before(), "dependency");
-            requireEvent(dependency.after(), "dependency");
+            event(dependency.before());
+            event(dependency.after());
             if (!pairs.add(List.of(dependency.before(), dependency.after()))) {
                 throw new IllegalArgumentException("Duplicate dependency " + dependency.before() + " → " + dependency.after());
             }
@@ -102,46 +108,6 @@ public final class Problem {
         this.pinned = assignments(pinned, "pinned assignments");
         this.baseline = assignments(baseline, "baseline");
         this.pinnedByEvent = index(this.pinned, Assignment::eventId);
-    }
-
-    public TimeGrid grid() {
-        return grid;
-    }
-
-    public List<Person> people() {
-        return people;
-    }
-
-    public List<Room> rooms() {
-        return rooms;
-    }
-
-    public List<CommissionCandidate> commissionPool() {
-        return commissionPool;
-    }
-
-    public List<Event> events() {
-        return events;
-    }
-
-    public List<Dependency> dependencies() {
-        return dependencies;
-    }
-
-    public List<Assignment> pinned() {
-        return pinned;
-    }
-
-    public List<Assignment> baseline() {
-        return baseline;
-    }
-
-    public int roomChangeBuffer() {
-        return roomChangeBuffer;
-    }
-
-    public Weights weights() {
-        return weights;
     }
 
     public Person person(long id) {
@@ -163,12 +129,12 @@ public final class Problem {
     private List<Assignment> assignments(List<Assignment> assignments, String what) {
         List<Assignment> sorted = sorted(assignments, Assignment::eventId, what);
         for (Assignment assignment : sorted) {
-            Event event = requireEvent(assignment.eventId(), what);
+            Event event = event(assignment.eventId());
             requireInGrid(SlotRange.ofLength(assignment.start(), event.duration()), what + " of event " + event.id());
-            if (assignment.venue() instanceof Venue.InRoom(long roomId) && !roomsById.containsKey(roomId)) {
-                throw new IllegalArgumentException("Unknown room " + roomId + " in " + what + " of event " + event.id());
+            if (assignment.venue() instanceof Venue.InRoom(long roomId)) {
+                room(roomId);
             }
-            assignment.commission().forEach(id -> requirePerson(id, "commission of event " + event.id() + " in " + what));
+            assignment.commission().forEach(this::person);
         }
         return sorted;
     }
@@ -179,20 +145,6 @@ public final class Problem {
         }
     }
 
-    private void requirePerson(long id, String what) {
-        if (!peopleById.containsKey(id)) {
-            throw new IllegalArgumentException("Unknown person " + id + " as " + what);
-        }
-    }
-
-    private Event requireEvent(long id, String what) {
-        Event event = eventsById.get(id);
-        if (event == null) {
-            throw new IllegalArgumentException("Unknown event " + id + " in " + what);
-        }
-        return event;
-    }
-
     private static <T> List<T> sorted(List<T> items, Function<T, Long> id, String what) {
         List<T> sorted = items.stream().sorted(Comparator.comparing(id)).toList();
         Ids.sortedUnique(sorted.stream().map(id).toList(), what);
@@ -200,9 +152,7 @@ public final class Problem {
     }
 
     private static <T> Map<Long, T> index(List<T> items, Function<T, Long> id) {
-        Map<Long, T> index = new LinkedHashMap<>();
-        items.forEach(item -> index.put(id.apply(item), item));
-        return Map.copyOf(index);
+        return items.stream().collect(Collectors.toUnmodifiableMap(id, Function.identity()));
     }
 
     private static <T> T find(Map<Long, T> index, long id, String what) {

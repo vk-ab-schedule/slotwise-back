@@ -1,7 +1,8 @@
 package ru.vk.itmo.scheduler.slotwise.domain;
 
+import lombok.NonNull;
+
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Event to schedule. The event type is not part of the model: the application copies its values
@@ -16,10 +17,10 @@ import java.util.Objects;
 public record Event(
         long id,
         int duration,
-        Scope scope,
-        Format format,
+        @NonNull Scope scope,
+        @NonNull Format format,
         List<Long> participants,
-        CommissionRequirement commission,
+        @NonNull CommissionRequirement commission,
         List<Long> commissionExcluded,
         List<Long> equipment,
         int preparationDays) {
@@ -28,9 +29,6 @@ public record Event(
         if (duration <= 0) {
             throw new IllegalArgumentException("Event " + id + " must have a positive duration: " + duration);
         }
-        Objects.requireNonNull(scope, "scope");
-        Objects.requireNonNull(format, "format");
-        Objects.requireNonNull(commission, "commission");
         participants = Ids.sortedUnique(participants, "participants of event " + id);
         if (participants.isEmpty()) {
             throw new IllegalArgumentException("Event " + id + " has no participants");

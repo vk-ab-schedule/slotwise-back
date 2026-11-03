@@ -1,9 +1,13 @@
 package ru.vk.itmo.scheduler.slotwise.domain;
 
+import java.util.Comparator;
+
 /**
  * Half-open range of slots {@code [start, end)}.
  */
 public record SlotRange(int start, int end) implements Comparable<SlotRange> {
+    private static final Comparator<SlotRange> ORDER =
+            Comparator.comparingInt(SlotRange::start).thenComparingInt(SlotRange::end);
 
     public SlotRange {
         if (start < 0 || end <= start) {
@@ -29,6 +33,6 @@ public record SlotRange(int start, int end) implements Comparable<SlotRange> {
 
     @Override
     public int compareTo(SlotRange other) {
-        return start != other.start ? Integer.compare(start, other.start) : Integer.compare(end, other.end);
+        return ORDER.compare(this, other);
     }
 }

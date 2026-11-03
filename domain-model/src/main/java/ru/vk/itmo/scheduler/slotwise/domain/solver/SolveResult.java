@@ -1,12 +1,12 @@
 package ru.vk.itmo.scheduler.slotwise.domain.solver;
 
+import lombok.NonNull;
 import ru.vk.itmo.scheduler.slotwise.domain.Assignment;
 import ru.vk.itmo.scheduler.slotwise.domain.Score;
 
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -18,17 +18,13 @@ import java.util.OptionalLong;
  * @param penaltyBound proven lower bound of the penalty for this number of unassigned events, if the solver has one (CP-SAT)
  */
 public record SolveResult(
-        SolveStatus status,
+        @NonNull SolveStatus status,
         List<Assignment> assignments,
-        Optional<Score> score,
-        OptionalLong penaltyBound,
-        Duration elapsed) {
+        @NonNull Optional<Score> score,
+        @NonNull OptionalLong penaltyBound,
+        @NonNull Duration elapsed) {
 
     public SolveResult {
-        Objects.requireNonNull(status, "status");
-        Objects.requireNonNull(score, "score");
-        Objects.requireNonNull(penaltyBound, "penaltyBound");
-        Objects.requireNonNull(elapsed, "elapsed");
         assignments = assignments.stream().sorted(Comparator.comparingLong(Assignment::eventId)).toList();
         for (int i = 1; i < assignments.size(); i++) {
             if (assignments.get(i).eventId() == assignments.get(i - 1).eventId()) {

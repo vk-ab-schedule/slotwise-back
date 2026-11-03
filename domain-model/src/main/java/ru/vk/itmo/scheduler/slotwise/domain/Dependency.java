@@ -1,13 +1,14 @@
 package ru.vk.itmo.scheduler.slotwise.domain;
 
-import java.util.Objects;
+import lombok.NonNull;
+
 import java.util.OptionalInt;
 
 /**
  * Event {@code before} takes place before event {@code after}, their dates differ by at least
  * {@code minGapDays} and, if set, by at most {@code maxGapDays} (H7).
  */
-public record Dependency(long before, long after, int minGapDays, OptionalInt maxGapDays) {
+public record Dependency(long before, long after, int minGapDays, @NonNull OptionalInt maxGapDays) {
 
     public Dependency {
         if (before == after) {
@@ -16,7 +17,6 @@ public record Dependency(long before, long after, int minGapDays, OptionalInt ma
         if (minGapDays < 0) {
             throw new IllegalArgumentException("Minimum gap must not be negative: " + minGapDays);
         }
-        Objects.requireNonNull(maxGapDays, "maxGapDays");
         if (maxGapDays.isPresent() && maxGapDays.getAsInt() < minGapDays) {
             throw new IllegalArgumentException("Maximum gap " + maxGapDays.getAsInt() + " is less than minimum " + minGapDays);
         }

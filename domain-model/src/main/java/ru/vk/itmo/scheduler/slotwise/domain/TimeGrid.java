@@ -1,5 +1,12 @@
 package ru.vk.itmo.scheduler.slotwise.domain;
 
+import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NonNull;
+import lombok.ToString;
+import lombok.experimental.Accessors;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -7,7 +14,6 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -17,17 +23,25 @@ import java.util.Optional;
  * from the date of the origin. Events may be placed only inside working periods; each period
  * lies within one day (for example, 9:00–19:00 of a working day).
  */
+@Getter
+@Accessors(fluent = true)
+@EqualsAndHashCode
+@ToString
 public final class TimeGrid {
     private final Instant origin;
     private final ZoneId zone;
     private final int slotMinutes;
     private final int slotCount;
+    /** Sorted, non-overlapping; each period within one day. */
     private final List<SlotRange> workingPeriods;
+    @Getter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private final int[] dayOfSlot;
 
-    public TimeGrid(Instant origin, ZoneId zone, int slotMinutes, int slotCount, List<SlotRange> workingPeriods) {
-        this.origin = Objects.requireNonNull(origin, "origin");
-        this.zone = Objects.requireNonNull(zone, "zone");
+    public TimeGrid(@NonNull Instant origin, @NonNull ZoneId zone, int slotMinutes, int slotCount, List<SlotRange> workingPeriods) {
+        this.origin = origin;
+        this.zone = zone;
         if (slotMinutes <= 0 || 60 % slotMinutes != 0) {
             throw new IllegalArgumentException("Slot length must divide an hour: " + slotMinutes);
         }
@@ -61,29 +75,6 @@ public final class TimeGrid {
             }
             previous = period;
         }
-    }
-
-    public Instant origin() {
-        return origin;
-    }
-
-    public ZoneId zone() {
-        return zone;
-    }
-
-    public int slotMinutes() {
-        return slotMinutes;
-    }
-
-    public int slotCount() {
-        return slotCount;
-    }
-
-    /**
-     * Sorted, non-overlapping; each period within one day.
-     */
-    public List<SlotRange> workingPeriods() {
-        return workingPeriods;
     }
 
     public Instant toInstant(int slot) {
@@ -141,22 +132,4 @@ public final class TimeGrid {
         return false;
     }
 
-    @Override
-    public boolean equals(Object other) {
-        return other instanceof TimeGrid that
-                && origin.equals(that.origin) && zone.equals(that.zone)
-                && slotMinutes == that.slotMinutes && slotCount == that.slotCount
-                && workingPeriods.equals(that.workingPeriods);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(origin, zone, slotMinutes, slotCount, workingPeriods);
-    }
-
-    @Override
-    public String toString() {
-        return "TimeGrid[origin=" + origin + ", zone=" + zone + ", slotMinutes=" + slotMinutes
-                + ", slotCount=" + slotCount + ", workingPeriods=" + workingPeriods.size() + "]";
-    }
 }

@@ -1,16 +1,16 @@
 package ru.vk.itmo.scheduler.slotwise.domain;
 
+import lombok.NonNull;
+
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Participant of the session. The id is the account id.
  */
-public record Person(long id, Role role, List<Busy> busy) {
+public record Person(long id, @NonNull Role role, List<Busy> busy) {
 
     public Person {
-        Objects.requireNonNull(role, "role");
         busy = busy.stream()
                 .sorted(Comparator.comparing(Busy::range).thenComparing(Busy::kind))
                 .toList();
@@ -24,12 +24,7 @@ public record Person(long id, Role role, List<Busy> busy) {
     /**
      * Busy time of a person.
      */
-    public record Busy(SlotRange range, Kind kind) {
-
-        public Busy {
-            Objects.requireNonNull(range, "range");
-            Objects.requireNonNull(kind, "kind");
-        }
+    public record Busy(@NonNull SlotRange range, @NonNull Kind kind) {
 
         public enum Kind {
             /** Classes from the university timetable: always hard (H4). */
