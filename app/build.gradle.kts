@@ -42,3 +42,19 @@ tasks.bootJar {
 tasks.jar {
     enabled = false
 }
+
+tasks.register<Test>("exportOpenApi") {
+    group = "documentation"
+    description = "Export springdoc JSON to build/openapi/slotwise.json"
+    dependsOn(tasks.testClasses)
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    filter {
+        includeTestsMatching("*OpenApiContractTests.exportsConsumerUsableSpecificationWithoutPostMvpOperations")
+    }
+    val schemaFile = layout.buildDirectory.file("openapi/slotwise.json")
+    systemProperty("slotwise.openapi.output", schemaFile.get().asFile.absolutePath)
+    environment("SPRING_DOCKER_COMPOSE_ENABLED", "false")
+    outputs.file(schemaFile)
+}
