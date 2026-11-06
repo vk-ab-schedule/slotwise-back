@@ -1,5 +1,7 @@
 package ru.vk.itmo.scheduler.slotwise.auth;
 
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
+
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -20,13 +22,13 @@ import ru.vk.itmo.scheduler.slotwise.account.AccountRepository;
  * it ends the session and answers 204.
  */
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping(value = ApiPaths.AUTH, produces = "application/json")
 @RequiredArgsConstructor
 class AuthController {
     private final LoginService loginService;
     private final AccountRepository accounts;
 
-    @Operation(summary = "Log in with email and password, start a session")
+    @Operation(operationId = "login", summary = "Войти по email и паролю", description = "Creates SESSION cookie. Requires CSRF; refresh XSRF-TOKEN after login.")
     @PostMapping("/login")
     @Transactional(readOnly = true)
     public CurrentUserResponse login(@Valid @RequestBody LoginRequest login,
@@ -35,7 +37,7 @@ class AuthController {
         return currentUser(principal);
     }
 
-    @Operation(summary = "Current user of the session")
+    @Operation(operationId = "getCurrentUser", summary = "Current user", description = "401 without authentication; also initializes the CSRF cookie.")
     @GetMapping("/me")
     @Transactional(readOnly = true)
     public CurrentUserResponse me(@AuthenticationPrincipal AccountPrincipal principal) {

@@ -1,5 +1,7 @@
 package ru.vk.itmo.scheduler.slotwise.auth;
 
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
+
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -41,7 +43,7 @@ class SecurityConfig {
                                             @Qualifier("handlerExceptionResolver") HandlerExceptionResolver exceptionResolver) {
         http
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, ApiPaths.AUTH + "/login").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/v3/api-docs", "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**").permitAll()
                         .requestMatchers("/error").permitAll()
@@ -51,7 +53,7 @@ class SecurityConfig {
                         .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler()))
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .logout(logout -> logout
-                        .logoutUrl("/api/auth/logout")
+                        .logoutUrl(ApiPaths.AUTH + "/logout")
                         .logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler(HttpStatus.NO_CONTENT)))
                 // 401 and 403 go through the same @RestControllerAdvice as other API errors (Problem Details).
                 .exceptionHandling(exceptions -> exceptions

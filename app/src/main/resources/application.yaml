@@ -1,6 +1,9 @@
 spring:
   application:
     name: slotwise-back
+  jackson:
+    deserialization:
+      accept-float-as-int: false
   jpa:
     hibernate:
       ddl-auto: validate
@@ -29,3 +32,8 @@ server:
       cookie:
         http-only: true
         same-site: lax
+
+springdoc:
+  api-docs:
+    version: OPENAPI_3_1
+  writer-with-order-by-keys: true
