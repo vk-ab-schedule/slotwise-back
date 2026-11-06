@@ -2,6 +2,7 @@ package ru.vk.itmo.scheduler.slotwise.common;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -9,6 +10,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import ru.vk.itmo.scheduler.slotwise.planning.PlanningException;
 
 /**
  * The single place where exceptions become Problem Details (RFC 9457).
@@ -17,6 +19,16 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  */
 @RestControllerAdvice
 class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+
+    @ExceptionHandler(PlanningException.class)
+    ProblemDetail handlePlanning(PlanningException e) {
+        return problem(e.getStatus(), e.getCode(), e.getMessage());
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ProblemDetail handleConcurrentModification(OptimisticLockingFailureException e) {
+        return problem(HttpStatus.CONFLICT, "CONCURRENT_MODIFICATION", "Данные изменились; обновите их и повторите запрос");
+    }
 
     @ExceptionHandler(AuthenticationException.class)
     ProblemDetail handleAuthentication(AuthenticationException e) {
