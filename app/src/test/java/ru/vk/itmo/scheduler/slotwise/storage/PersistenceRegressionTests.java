@@ -8,6 +8,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,7 +69,7 @@ class PersistenceRegressionTests {
     void rejectsSnapshotRewrite() {
         var fixtures = new StorageFixtures(jdbc);
         long id = fixtures.snapshot(fixtures.session(), 0);
-        assertThrows(org.springframework.dao.DataAccessException.class, () -> jdbc.update("""
+        assertThrows(DataAccessException.class, () -> jdbc.update("""
                 update slotwise.input_snapshot set problem='{"changed":true}' where id=?
                 """, id));
     }
