@@ -28,15 +28,23 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 public abstract class ApiContractTestBase {
     @MockitoBean
     private AccountRepository accounts;
+    @MockitoBean
+    protected ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityFacade availability;
+    @MockitoBean
+    private ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityService availabilityService;
     @Autowired
     private WebApplicationContext context;
     protected MockMvc mvc;
 
     @BeforeEach
     void authenticatedContractClient() {
+        var principal = org.mockito.Mockito.mock(ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal.class);
+        org.mockito.Mockito.when(principal.getAccountId()).thenReturn(1L);
+        var authentication = org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated(
+                principal, null, org.springframework.security.core.authority.AuthorityUtils.createAuthorityList(
+                        "ROLE_ADMIN", "ROLE_ORGANIZER", "ROLE_TEACHER", "ROLE_STUDENT"));
         mvc = MockMvcBuilders.webAppContextSetup(context)
-                .defaultRequest(get("/").with(user("contract-reviewer")
-                        .roles("ADMIN", "ORGANIZER", "TEACHER", "STUDENT")).with(csrf()))
+                .defaultRequest(get("/").with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication(authentication)).with(csrf()))
                 .apply(springSecurity()).build();
     }
 }

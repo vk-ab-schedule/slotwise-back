@@ -37,7 +37,7 @@ class PlanningModelContractTests extends ApiContractTestBase {
     @Test
     void acceptsExactlyTheFiveIntegerWeightsAndFiveMinuteBuffer() throws Exception {
         mvc.perform(put("/api/sessions/1/rules").contentType(MediaType.APPLICATION_JSON).content(RULES))
-                .andExpect(status().isNotImplemented());
+                .andExpect(status().isOk());
     }
 
     @Test
