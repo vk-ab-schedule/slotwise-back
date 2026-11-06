@@ -19,7 +19,9 @@ import ru.vk.itmo.scheduler.slotwise.solving.InputSnapshotEntity;
 
 import java.time.Instant;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)

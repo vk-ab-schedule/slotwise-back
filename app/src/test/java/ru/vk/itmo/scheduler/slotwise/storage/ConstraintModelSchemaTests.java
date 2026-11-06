@@ -11,7 +11,9 @@ import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Schema changes of the constraint model revision (D-16, migration V7).
