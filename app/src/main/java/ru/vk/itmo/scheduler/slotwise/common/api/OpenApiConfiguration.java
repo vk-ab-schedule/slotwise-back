@@ -111,7 +111,9 @@ public class OpenApiConfiguration {
             }
             errors.forEach((code, description) -> operation.getResponses().addApiResponse(code,
                     problemResponse(description)));
-            if (List.of("login", "getCurrentUser").contains(operation.getOperationId())) {
+            if (List.of("login", "getCurrentUser", "getMyBusyCalendar", "replaceMyBusyCalendar",
+                    "submitMyBusyCalendar", "getCollection", "closeCollection", "changeCollectionDeadline",
+                    "getSessionRules", "replaceSessionRules").contains(operation.getOperationId())) {
                 operation.getResponses().remove("501");
             }
             RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(), RequestMapping.class);

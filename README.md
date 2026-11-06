@@ -89,6 +89,41 @@ Java 25, Lombok, JUnit 5 и AssertJ подключаются плагином. �
 - **Версия PostgreSQL** — 18: в `app/compose.yaml`, в Testcontainers и на стенде.
 - **Подключиться к локальной БД** клиентом: порт выбирается случайно, его показывает `docker ps` (контейнер `slotwise-postgres-1`). Логин, пароль и база — `slotwise`.
 
+## API занятости, сбора и правил (B5)
+
+Сессия и участники должны быть созданы заранее (B4). Контракт доступен в OpenAPI.
+
+| Метод и путь `/api/sessions/{id}` | Доступ |
+| --- | --- |
+| `GET`, `PUT /busy-intervals/me` | Студент или преподаватель — участник сессии |
+| `POST /busy-intervals/me/submit` | Участник сессии |
+| `GET`, `PATCH /collection`, `POST /collection/close` | Организатор — владелец |
+| `GET`, `PUT /rules` | Организатор — владелец |
+
+`GET /busy-intervals/me` возвращает `revision`, `timeZone`, `editable`, личные `intervals`,
+учебную занятость `knownBusy` (только чтение) и предупреждения `issues`.
+При сохранении передаются `expectedRevision` из GET и полный список `intervals`;
+при отправке ответа — `expectedRevision`. Пустой список допустим. Сохранение и отправка — разные действия.
+Редактирование отправленного календаря до закрытия сбора сохраняет статус `SUBMITTED`.
+Ревизия меняется при изменении входных данных сессии, включая ответы других участников;
+при `409` нужно обновить данные и повторить действие с актуальной ревизией.
+
+Интервалы округляются наружу до 5 минут и обрезаются по периоду, рабочим дням и часам сессии
+в её часовом поясе. На пересечении действует максимальная важность `CRITICAL > MEDIUM > LOW`.
+
+Правила и состояние сбора возвращают `sessionVersion` и `inputVersion`.
+`PUT /rules`, `PATCH /collection` и `POST /collection/close` требуют `expectedVersion`, равный `sessionVersion`.
+`PATCH /collection` дополнительно принимает новый `endsAt`: в будущем и строго до начала сессии.
+Закрытый сбор не открывается повторно; ответы сохраняются. Автозапуск солвера не выполняется (D-15).
+Повторное закрытие с актуальной версией не меняет данные.
+
+В `weights` передаются пять неотрицательных целых весов: `teacherGaps` (S1),
+`commissionLoadSpread` (S2), `undesirableTime` (S3), `teacherRoomChanges` (S4), `movedEvents` (S5).
+Также обязательны `roomChangeBufferMinutes` (кратно 5), `defaultAlgorithm`,
+`timeLimitSeconds` (положительный) и `seed`.
+Вес по умолчанию для каждого S1–S5 равен 1; конфигурация — `slotwise.planning.default-weights`.
+Шаг сетки — 5 минут. Используется общая миграция `V7__revise_constraint_model.sql`.
+
 ## Непрерывная интеграция
 
 GitHub Actions запускает проверку `Backend tests` для каждого PR, после push в `main` и `sprint/*`, а также вручную через Actions. Команда `./gradlew build --no-daemon --stacktrace --console=plain` собирает все модули, запускает тесты и `verifyNoSpring`; PostgreSQL для тестов поднимает Testcontainers на runner. JDK — Temurin 25.
