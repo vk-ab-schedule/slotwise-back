@@ -1,5 +1,8 @@
 package ru.vk.itmo.scheduler.slotwise.api;
 
+import org.mockito.Mockito;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
@@ -18,10 +21,10 @@ class PlanningContractTests extends ApiContractTestBase {
         mvc.perform(post("/api/sessions/1/busy-intervals/me/submit").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"expectedRevision\":\"r1\"}"))
                 .andExpect(status().isOk());
-        org.mockito.Mockito.verify(availability).saveBusy(1L, 1L,
-                new ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar.ReplaceRequest("r1", java.util.List.of()));
-        org.mockito.Mockito.verify(availability).submit(1L, 1L,
-                new ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar.SubmitRequest("r1"));
+        Mockito.verify(availability).saveBusy(1L, 1L,
+                new BusyCalendar.ReplaceRequest("r1", List.of()));
+        Mockito.verify(availability).submit(1L, 1L,
+                new BusyCalendar.SubmitRequest("r1"));
     }
 
     @Test

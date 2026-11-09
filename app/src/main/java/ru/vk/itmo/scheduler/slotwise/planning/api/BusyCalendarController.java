@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
-import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityFacade;
+import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityService;
 import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar;
 
 @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER')")
@@ -26,7 +26,7 @@ import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar;
 @RequestMapping(value = ApiPaths.SESSIONS + "/{id}/busy-intervals/me", produces = "application/json")
 @Tag(name = "Own availability", description = "Session participant; authenticated user is always the calendar owner")
 public class BusyCalendarController {
-    private final PlanningAvailabilityFacade service;
+    private final PlanningAvailabilityService service;
     @GetMapping()
     @Operation(operationId = "getMyBusyCalendar", summary = "Моя занятость", description = "Known timetable is read-only and always hard. Personal CRITICAL availability is hard for teachers and individual student events; for group events student CRITICAL availability is soft with coefficient 10 (D-16). Missing timetable produces a warning. No accountId override.")
     public BusyCalendar.Response getMyBusyCalendar(@PathVariable("id") @Min(1) long id, @AuthenticationPrincipal AccountPrincipal user) {

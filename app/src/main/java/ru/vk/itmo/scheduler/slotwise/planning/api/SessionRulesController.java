@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
-import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityFacade;
+import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityService;
 import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionRules;
 
 @PreAuthorize("hasRole('ORGANIZER')")
@@ -25,7 +25,7 @@ import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionRules;
 @RequestMapping(value = ApiPaths.SESSIONS + "/{id}/rules", produces = "application/json")
 @Tag(name = "Session rules", description = "ORGANIZER owner; hard constraints are server controlled")
 public class SessionRulesController {
-    private final PlanningAvailabilityFacade service;
+    private final PlanningAvailabilityService service;
 
     @GetMapping()
     @Operation(operationId = "getSessionRules", summary = "Получить правила и веса", description = "Includes defaults and current session/input versions.")

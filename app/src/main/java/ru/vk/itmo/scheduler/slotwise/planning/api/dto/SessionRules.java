@@ -1,12 +1,14 @@
 package ru.vk.itmo.scheduler.slotwise.planning.api.dto;
 
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 
 import ru.vk.itmo.scheduler.slotwise.common.api.MultipleOf;
+import ru.vk.itmo.scheduler.slotwise.domain.TimeGrid;
 import ru.vk.itmo.scheduler.slotwise.solving.SolverAlgorithm;
 
 public final class SessionRules {
@@ -26,11 +28,11 @@ public final class SessionRules {
     public record UpdateRequest(
             @NotNull @PositiveOrZero Long expectedVersion,
             @NotNull @Valid Weights weights,
-            @NotNull @PositiveOrZero @MultipleOf(5)
-            @Schema(multipleOf = 5, description = "Room-change buffer in minutes; default is 15")
+            @NotNull @PositiveOrZero @MultipleOf(TimeGrid.DEFAULT_SLOT_MINUTES)
+            @Schema(multipleOf = TimeGrid.DEFAULT_SLOT_MINUTES, description = "Room-change buffer in minutes; default is 15")
             Integer roomChangeBufferMinutes,
             @NotNull SolverAlgorithm defaultAlgorithm,
-            @NotNull @Min(1) Integer timeLimitSeconds,
+            @NotNull @Min(1) @Max(300) Integer timeLimitSeconds,
             @NotNull Long seed) {
     }
 
@@ -43,7 +45,7 @@ public final class SessionRules {
                     description = "Server-chosen model parameter in minutes, currently 5; informational and not editable in requests")
             int slotMinutes,
             @NotNull Weights weights,
-            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0", multipleOf = 5,
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0", multipleOf = TimeGrid.DEFAULT_SLOT_MINUTES,
                     description = "Room-change buffer in minutes; default is 15") int roomChangeBufferMinutes,
             @NotNull SolverAlgorithm defaultAlgorithm,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) int timeLimitSeconds,

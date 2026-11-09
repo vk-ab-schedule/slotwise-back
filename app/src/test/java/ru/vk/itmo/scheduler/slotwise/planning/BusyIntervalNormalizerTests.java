@@ -8,10 +8,10 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static ru.vk.itmo.scheduler.slotwise.planning.PlanningApi.Interval;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar.IntervalRequest;
 
 class BusyIntervalNormalizerTests {
-    private final BusyIntervalNormalizer normalizer = new BusyIntervalNormalizer(new PlanningProperties());
+    private final BusyIntervalNormalizer normalizer = new BusyIntervalNormalizer();
 
     @Test
     void roundsOutwardsAndUsesHighestPriorityOnlyOnOverlap() {
@@ -45,7 +45,7 @@ class BusyIntervalNormalizerTests {
         assertThat(windows).containsExactly(
                 window("2027-01-15T07:00:00Z", "2027-01-15T16:00:00Z"),
                 window("2027-01-18T06:00:00Z", "2027-01-18T15:00:00Z"));
-        var actual = normalizer.normalize(List.of(new Interval(Instant.MIN, Instant.MAX, BusyImportance.MEDIUM)), windows);
+        var actual = normalizer.normalize(List.of(new IntervalRequest(Instant.MIN, Instant.MAX, BusyImportance.MEDIUM)), windows);
         assertThat(actual).hasSize(2);
         assertThat(actual.getFirst().startsAt()).isEqualTo(windows.getFirst().start());
         assertThat(actual.getLast().endsAt()).isEqualTo(windows.getLast().end());
@@ -106,7 +106,7 @@ class BusyIntervalNormalizerTests {
         return new BusyIntervalNormalizer.Window(Instant.parse(start), Instant.parse(end));
     }
 
-    private static Interval interval(String start, String end, BusyImportance importance) {
-        return new Interval(Instant.parse(start), Instant.parse(end), importance);
+    private static IntervalRequest interval(String start, String end, BusyImportance importance) {
+        return new IntervalRequest(Instant.parse(start), Instant.parse(end), importance);
     }
 }

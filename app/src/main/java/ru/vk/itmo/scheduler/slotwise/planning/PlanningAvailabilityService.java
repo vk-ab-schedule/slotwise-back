@@ -15,10 +15,25 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-import static ru.vk.itmo.scheduler.slotwise.planning.PlanningApi.*;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar.IntervalRequest;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.ChangeCollectionRequest;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.CollectionResponse;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.CollectionResponse.ParticipantResponse;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionRules;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionVersionRequest;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiIssue;
+import ru.vk.itmo.scheduler.slotwise.common.api.IssueSeverity;
+import ru.vk.itmo.scheduler.slotwise.common.api.PersonSummary;
+import ru.vk.itmo.scheduler.slotwise.domain.TimeGrid;
+import ru.vk.itmo.scheduler.slotwise.domain.Weights;
 
 @Service
 @RequiredArgsConstructor
@@ -33,31 +48,30 @@ public class PlanningAvailabilityService {
     private final AccountRepository accounts;
     private final TimetableEntryRepository timetable;
     private final BusyIntervalNormalizer normalizer;
-    private final PlanningProperties properties;
     private final JsonMapper json;
     private final Clock clock;
 
-    public BusyResponse busy(long id, long user) {
+    public BusyCalendar.Response busy(long id, long user) {
         var session = session(id, false);
         return busyResponse(session, participant(id, user));
     }
 
     @Transactional
-    public BusyResponse saveBusy(long id, long user, SaveBusyRequest request) {
+    public BusyCalendar.Response saveBusy(long id, long user, BusyCalendar.ReplaceRequest request) {
         var session = session(id, true);
         var participant = participant(id, user);
         requireOpen(session);
-        requireVersion(session, request.inputVersion());
-        for (Interval interval : request.intervals()) {
+        requireRevision(participant, request.expectedRevision());
+        for (IntervalRequest interval : request.intervals()) {
             if (!interval.startsAt().isBefore(interval.endsAt())) {
                 throw invalid("INVALID_INTERVAL", "Начало интервала должно быть раньше конца");
             }
         }
-        List<Interval> normalized = normalizer.normalize(request.intervals(), windows(session));
-        List<Interval> previous = personal(id, user);
+        List<IntervalRequest> normalized = normalizer.normalize(request.intervals(), windows(session));
+        List<IntervalRequest> previous = personal(id, user);
         if (!normalized.equals(previous)) {
             busyIntervals.deletePersonal(id, user);
-            for (Interval interval : normalized) {
+            for (IntervalRequest interval : normalized) {
                 var entity = new BusyIntervalEntity();
                 entity.setPlanningSessionId(id);
                 entity.setAccountId(user);
@@ -67,19 +81,22 @@ public class PlanningAvailabilityService {
                 busyIntervals.save(entity);
             }
             // Editing a submitted calendar keeps its submitted status until collection closes.
+            bumpCalendar(participant);
             bump(session);
         }
         return busyResponse(session, participant);
     }
 
     @Transactional
-    public BusyResponse submit(long id, long user) {
+    public BusyCalendar.Response submit(long id, long user, BusyCalendar.SubmitRequest request) {
         var session = session(id, true);
         var participant = participant(id, user);
         requireOpen(session);
+        requireRevision(participant, request.expectedRevision());
         if (participant.getResponseStatus() != ResponseStatus.SUBMITTED) {
             participant.setResponseStatus(ResponseStatus.SUBMITTED);
             participant.setSubmittedAt(clock.instant());
+            bumpCalendar(participant);
             bump(session);
         }
         return busyResponse(session, participant);
@@ -95,8 +112,10 @@ public class PlanningAvailabilityService {
     public CollectionResponse changeCollection(long id, long user, ChangeCollectionRequest request) {
         var session = session(id, true);
         requireOwner(session, user);
-        requireVersion(session, request.inputVersion());
-        if (status(session) == CollectionStatus.CLOSED) throw closed();
+        requireVersion(session, request.expectedVersion());
+        if (status(session) == CollectionStatus.CLOSED) {
+            throw closed();
+        }
         if (!request.endsAt().isAfter(clock.instant())
                 || !request.endsAt().isAfter(session.getCollectionStartsAt())
                 || !request.endsAt().isBefore(session.getStartsAt())) {
@@ -106,13 +125,15 @@ public class PlanningAvailabilityService {
             session.setCollectionEndsAt(request.endsAt());
             bump(session);
         }
+        sessions.flush();
         return collectionResponse(session);
     }
 
     @Transactional
-    public CollectionResponse close(long id, long user) {
+    public CollectionResponse close(long id, long user, SessionVersionRequest request) {
         var session = session(id, true);
         requireOwner(session, user);
+        requireVersion(session, request.expectedVersion());
         if (status(session) == CollectionStatus.PENDING) {
             throw conflict("COLLECTION_NOT_OPEN", "Сбор ещё не начался");
         }
@@ -120,36 +141,39 @@ public class PlanningAvailabilityService {
             session.setCollectionStatus(CollectionStatus.CLOSED);
             bump(session);
         }
+        sessions.flush();
         return collectionResponse(session);
     }
 
-    public RulesResponse rules(long id, long user) {
+    public SessionRules.Response rules(long id, long user) {
         var session = session(id, false);
         requireOwner(session, user);
         return rulesResponse(session, rules.findById(id).orElse(null));
     }
 
     @Transactional
-    public RulesResponse saveRules(long id, long user, SaveRulesRequest request) {
+    public SessionRules.Response saveRules(long id, long user, SessionRules.UpdateRequest request) {
         var session = session(id, true);
         requireOwner(session, user);
-        requireVersion(session, request.inputVersion());
-        if (!request.weights().keySet().equals(WEIGHT_KEYS)) {
-            throw invalid("INVALID_WEIGHTS", "Нужно передать все веса S1, S2, S3, S4, S5");
-        }
-        if (request.roomChangeBufferMinutes() % properties.getSlotMinutes() != 0) {
+        requireVersion(session, request.expectedVersion());
+        if (request.roomChangeBufferMinutes() % TimeGrid.DEFAULT_SLOT_MINUTES != 0) {
             throw invalid("INVALID_BUFFER", "Буфер должен быть кратен длине слота");
+        }
+        if (request.timeLimitSeconds() < 1 || request.timeLimitSeconds() > 300) {
+            throw invalid("INVALID_TIME_LIMIT", "Лимит времени должен быть от 1 до 300 секунд");
         }
         var entity = rules.findById(id).orElse(null);
         var before = rulesResponse(session, entity);
-        var desired = new RulesResponse(session.getInputVersion(), Map.copyOf(request.weights()),
+        var desired = new SessionRules.Response(session.getVersion(), session.getInputVersion(), TimeGrid.DEFAULT_SLOT_MINUTES, request.weights(),
                 request.roomChangeBufferMinutes(), request.defaultAlgorithm(), request.timeLimitSeconds(), request.seed());
         if (entity == null || !before.equals(desired)) {
             if (entity == null) {
                 entity = new SessionRuleEntity();
                 entity.setPlanningSessionId(id);
             }
-            entity.setWeights(json.writeValueAsString(request.weights()));
+            entity.setWeights(json.writeValueAsString(Map.of("S1", request.weights().teacherGaps(),
+                    "S2", request.weights().commissionLoadSpread(), "S3", request.weights().undesirableTime(),
+                    "S4", request.weights().teacherRoomChanges(), "S5", request.weights().movedEvents())));
             entity.setRoomChangeBufferMinutes(request.roomChangeBufferMinutes());
             entity.setDefaultAlgorithm(request.defaultAlgorithm());
             entity.setTimeLimitSeconds(request.timeLimitSeconds());
@@ -157,24 +181,36 @@ public class PlanningAvailabilityService {
             entity = rules.save(entity);
             bump(session);
         }
+        sessions.flush();
         return rulesResponse(session, entity);
     }
 
-    private BusyResponse busyResponse(PlanningSessionEntity session, SessionParticipantEntity participant) {
-        List<Interval> personal = personal(session.getId(), participant.getAccountId());
+    private BusyCalendar.Response busyResponse(PlanningSessionEntity session, SessionParticipantEntity participant) {
+        List<IntervalRequest> personal = personal(session.getId(), participant.getAccountId());
         List<TimetableEntryEntity> known = known(session, List.of(participant.getAccountId()));
-        List<Warning> warnings = new ArrayList<>();
-        if (known.isEmpty()) warnings.add(Warning.NO_TIMETABLE);
-        if (normalizer.noFreeTime(withKnown(personal, known), windows(session))) warnings.add(Warning.NO_FREE_TIME);
+        List<ApiIssue> issues = new ArrayList<>();
+        if (known.isEmpty()) {
+            issues.add(warning("NO_TIMETABLE", "Учебное расписание отсутствует", participant.getAccountId()));
+        }
+        if (normalizer.noFreeTime(withKnown(personal, known), windows(session))) {
+            issues.add(warning("NO_FREE_TIME", "В рабочих часах сессии нет свободного времени", participant.getAccountId()));
+        }
         AccountEntity account = accounts.findById(participant.getAccountId()).orElseThrow();
         if (account.getRole() == AccountRole.STUDENT
                 && personal.stream().anyMatch(i -> i.importance() == BusyImportance.CRITICAL)) {
-            warnings.add(Warning.STUDENT_CRITICAL_IS_SOFT_FOR_GROUP_EVENTS);
+            issues.add(warning("STUDENT_CRITICAL_IS_SOFT_FOR_GROUP_EVENTS",
+                    "Критическая занятость студента — мягкое ограничение групповых событий", participant.getAccountId()));
         }
-        return new BusyResponse(session.getInputVersion(), status(session), participant.getResponseStatus(),
-                participant.getSubmittedAt(), personal, known.stream()
-                .map(t -> new KnownInterval(t.getId(), t.getStartsAt(), t.getEndsAt(), t.getDescription())).toList(),
-                List.copyOf(warnings));
+        var saved = busyIntervals.findByPlanningSessionIdAndAccountIdOrderByStartsAt(session.getId(), participant.getAccountId());
+        return new BusyCalendar.Response(session.getId(), revision(participant), session.getTimeZone(),
+                participant.getResponseStatus(), participant.getSubmittedAt(), status(session) == CollectionStatus.OPEN,
+                !known.isEmpty(), saved.stream().map(i -> new BusyCalendar.Interval(i.getId(), i.getStartsAt(), i.getEndsAt(), i.getImportance())).toList(),
+                known.stream().map(t -> new BusyCalendar.KnownBusy(t.getStartsAt(), t.getEndsAt(), t.getDescription())).toList(),
+                List.copyOf(issues));
+    }
+
+    private static ApiIssue warning(String code, String message, long user) {
+        return new ApiIssue(code, message, IssueSeverity.WARNING, List.of(), List.of(user), List.of());
     }
 
     private CollectionResponse collectionResponse(PlanningSessionEntity session) {
@@ -192,25 +228,31 @@ public class PlanningAvailabilityService {
                     .map(PlanningAvailabilityService::interval).toList();
             boolean noFreeTime = normalizer.noFreeTime(
                     withKnown(intervals, known.getOrDefault(member.getAccountId(), List.of())), windows);
-            result.add(new ParticipantResponse(account.getId(), account.getFirstName(), account.getLastName(),
-                    account.getRole(), member.getResponseStatus(), member.getSubmittedAt(), noFreeTime));
+            result.add(new ParticipantResponse(new PersonSummary(account.getId(), account.getLastName(), account.getFirstName(),
+                    account.getPatronymic(), account.getRole()), member.getResponseStatus(), member.getSubmittedAt(), noFreeTime));
         }
-        return new CollectionResponse(session.getInputVersion(), status(session),
-                session.getCollectionStartsAt(), session.getCollectionEndsAt(), List.copyOf(result));
+        return new CollectionResponse(status(session), session.getCollectionStartsAt(), session.getCollectionEndsAt(),
+                session.getVersion(), session.getInputVersion(), List.copyOf(result));
     }
 
-    private RulesResponse rulesResponse(PlanningSessionEntity session, SessionRuleEntity entity) {
-        Map<String, Integer> weights = new TreeMap<>(properties.getDefaultWeights());
-        if (!weights.keySet().equals(WEIGHT_KEYS)) {
-            throw new IllegalStateException("slotwise.planning.default-weights must contain S1 through S5");
+    private SessionRules.Response rulesResponse(PlanningSessionEntity session, SessionRuleEntity entity) {
+        var defaults = Weights.DEFAULT;
+        Map<String, Integer> weights = new TreeMap<>(Map.of("S1", defaults.gaps(), "S2", defaults.unfairness(),
+                "S3", defaults.undesirable(), "S4", defaults.roomSwitches(), "S5", defaults.moves()));
+        if (entity != null) {
+            var stored = json.readTree(entity.getWeights());
+            for (String key : WEIGHT_KEYS) {
+                if (stored.has(key)) {
+                    weights.put(key, stored.get(key).intValue());
+                }
+            }
         }
-        if (entity == null) return new RulesResponse(session.getInputVersion(), Map.copyOf(weights), 15, SolverAlgorithm.GREEDY, 60, 0);
-        var stored = json.readTree(entity.getWeights());
-        for (String key : WEIGHT_KEYS) {
-            if (stored.has(key)) weights.put(key, stored.get(key).intValue());
-        }
-        return new RulesResponse(session.getInputVersion(), Map.copyOf(weights), entity.getRoomChangeBufferMinutes(),
-                entity.getDefaultAlgorithm(), entity.getTimeLimitSeconds(), entity.getSeed());
+        var contractWeights = new SessionRules.Weights(weights.get("S1"), weights.get("S2"), weights.get("S3"),
+                weights.get("S4"), weights.get("S5"));
+        return new SessionRules.Response(session.getVersion(), session.getInputVersion(), TimeGrid.DEFAULT_SLOT_MINUTES,
+                contractWeights, entity == null ? 15 : entity.getRoomChangeBufferMinutes(),
+                entity == null ? SolverAlgorithm.GREEDY : entity.getDefaultAlgorithm(),
+                entity == null ? 60 : entity.getTimeLimitSeconds(), entity == null ? 0 : entity.getSeed());
     }
 
     private PlanningSessionEntity session(long id, boolean lock) {
@@ -226,26 +268,50 @@ public class PlanningAvailabilityService {
     }
 
     private static void requireOwner(PlanningSessionEntity session, long user) {
-        if (session.getOrganizerId() != user) throw new AccessDeniedException("Не владелец сессии");
+        if (session.getOrganizerId() != user) {
+            throw new AccessDeniedException("Не владелец сессии");
+        }
     }
 
     private CollectionStatus status(PlanningSessionEntity session) {
         Instant now = clock.instant();
-        if (session.getCollectionStatus() == CollectionStatus.CLOSED || !now.isBefore(session.getCollectionEndsAt()))
+        if (session.getCollectionStatus() == CollectionStatus.CLOSED || !now.isBefore(session.getCollectionEndsAt())) {
             return CollectionStatus.CLOSED;
-        if (now.isBefore(session.getCollectionStartsAt())) return CollectionStatus.PENDING;
+        }
+        if (now.isBefore(session.getCollectionStartsAt())) {
+            return CollectionStatus.PENDING;
+        }
         return CollectionStatus.OPEN;
     }
 
     private void requireOpen(PlanningSessionEntity session) {
         var status = status(session);
-        if (status == CollectionStatus.CLOSED) throw closed();
-        if (status != CollectionStatus.OPEN) throw conflict("COLLECTION_NOT_OPEN", "Сбор ещё не начался");
+        if (status == CollectionStatus.CLOSED) {
+            throw closed();
+        }
+        if (status != CollectionStatus.OPEN) {
+            throw conflict("COLLECTION_NOT_OPEN", "Сбор ещё не начался");
+        }
     }
 
     private static void requireVersion(PlanningSessionEntity session, long expected) {
-        if (session.getInputVersion() != expected)
-            throw conflict("STALE_INPUT_VERSION", "Данные сессии изменились; обновите их и повторите запрос");
+        if (session.getVersion() != expected) {
+            throw conflict("STALE_SESSION_VERSION", "Данные сессии изменились; обновите их и повторите запрос");
+        }
+    }
+
+    private static String revision(SessionParticipantEntity participant) {
+        return "v" + participant.getCalendarRevision();
+    }
+
+    private static void requireRevision(SessionParticipantEntity participant, String expected) {
+        if (!revision(participant).equals(expected)) {
+            throw conflict("STALE_REVISION", "Календарь изменился; обновите данные и повторите запрос");
+        }
+    }
+
+    private static void bumpCalendar(SessionParticipantEntity participant) {
+        participant.setCalendarRevision(Math.incrementExact(participant.getCalendarRevision()));
     }
 
     private static void bump(PlanningSessionEntity session) {
@@ -258,7 +324,7 @@ public class PlanningAvailabilityService {
         return normalizer.workingWindows(session, weekdays);
     }
 
-    private List<Interval> personal(long session, long user) {
+    private List<IntervalRequest> personal(long session, long user) {
         return busyIntervals.findByPlanningSessionIdAndAccountIdOrderByStartsAt(session, user).stream()
                 .map(PlanningAvailabilityService::interval).toList();
     }
@@ -268,13 +334,13 @@ public class PlanningAvailabilityService {
                 users, session.getEndsAt(), session.getStartsAt());
     }
 
-    private static Interval interval(BusyIntervalEntity entity) {
-        return new Interval(entity.getStartsAt(), entity.getEndsAt(), entity.getImportance());
+    private static IntervalRequest interval(BusyIntervalEntity entity) {
+        return new IntervalRequest(entity.getStartsAt(), entity.getEndsAt(), entity.getImportance());
     }
 
-    private static List<Interval> withKnown(List<Interval> personal, List<TimetableEntryEntity> known) {
-        List<Interval> result = new ArrayList<>(personal);
-        known.forEach(t -> result.add(new Interval(t.getStartsAt(), t.getEndsAt(), BusyImportance.CRITICAL)));
+    private static List<IntervalRequest> withKnown(List<IntervalRequest> personal, List<TimetableEntryEntity> known) {
+        List<IntervalRequest> result = new ArrayList<>(personal);
+        known.forEach(t -> result.add(new IntervalRequest(t.getStartsAt(), t.getEndsAt(), BusyImportance.CRITICAL)));
         return result;
     }
 

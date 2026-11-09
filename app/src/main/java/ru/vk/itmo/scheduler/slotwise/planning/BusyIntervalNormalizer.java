@@ -1,18 +1,22 @@
 package ru.vk.itmo.scheduler.slotwise.planning;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.time.*;
-import java.util.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeMap;
 
-import static ru.vk.itmo.scheduler.slotwise.planning.PlanningApi.Interval;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar.IntervalRequest;
+import ru.vk.itmo.scheduler.slotwise.domain.TimeGrid;
 
 /** Clips availability in the session zone; priorities apply only to the overlapping portion. */
 @Component
-@RequiredArgsConstructor
 public class BusyIntervalNormalizer {
-    private final PlanningProperties properties;
 
     public record Window(Instant start, Instant end) { }
 
@@ -22,44 +26,56 @@ public class BusyIntervalNormalizer {
         LocalDate last = session.getEndsAt().atZone(zone).toLocalDate();
         for (LocalDate date = session.getStartsAt().atZone(zone).toLocalDate();
              !date.isAfter(last); date = date.plusDays(1)) {
-            if (!weekdays.contains(date.getDayOfWeek().getValue())) continue;
+            if (!weekdays.contains(date.getDayOfWeek().getValue())) {
+                continue;
+            }
             Instant start = max(session.getStartsAt(), date.atTime(session.getWorkingDayStart()).atZone(zone).toInstant());
             Instant end = min(session.getEndsAt(), date.atTime(session.getWorkingDayEnd()).atZone(zone).toInstant());
-            if (start.isBefore(end)) result.add(new Window(start, end));
+            if (start.isBefore(end)) {
+                result.add(new Window(start, end));
+            }
         }
         return result;
     }
 
-    public List<Interval> normalize(List<Interval> input, List<Window> windows) {
-        if (windows.isEmpty()) return List.of();
-        long slotSeconds = properties.getSlotMinutes() * 60L;
+    public List<IntervalRequest> normalize(List<IntervalRequest> input, List<Window> windows) {
+        if (windows.isEmpty()) {
+            return List.of();
+        }
+        long slotSeconds = TimeGrid.DEFAULT_SLOT_MINUTES * 60L;
         TreeMap<Instant, int[]> changes = new TreeMap<>();
-        for (Interval item : input) {
+        for (IntervalRequest item : input) {
             // Clip first to keep even extreme client timestamps inside the session period.
             Instant start = max(item.startsAt(), windows.getFirst().start());
             Instant end = min(item.endsAt(), windows.getLast().end());
-            if (!start.isBefore(end)) continue;
+            if (!start.isBefore(end)) {
+                continue;
+            }
             start = Instant.ofEpochSecond(Math.floorDiv(start.getEpochSecond(), slotSeconds) * slotSeconds);
             long endSecond = Math.floorDiv(end.getEpochSecond(), slotSeconds) * slotSeconds;
-            if (end.getEpochSecond() != endSecond || end.getNano() != 0) endSecond += slotSeconds;
+            if (end.getEpochSecond() != endSecond || end.getNano() != 0) {
+                endSecond += slotSeconds;
+            }
             end = Instant.ofEpochSecond(endSecond);
             for (Window window : windows) {
                 Instant clippedStart = max(start, window.start());
                 Instant clippedEnd = min(end, window.end());
-                if (!clippedStart.isBefore(clippedEnd)) continue;
+                if (!clippedStart.isBefore(clippedEnd)) {
+                    continue;
+                }
                 int priority = item.importance().ordinal();
                 changes.computeIfAbsent(clippedStart, _ -> new int[BusyImportance.values().length])[priority]++;
                 changes.computeIfAbsent(clippedEnd, _ -> new int[BusyImportance.values().length])[priority]--;
             }
         }
-        List<Interval> result = new ArrayList<>();
+        List<IntervalRequest> result = new ArrayList<>();
         int[] active = new int[BusyImportance.values().length];
         Instant previous = null;
         for (var change : changes.entrySet()) {
             if (previous != null) {
                 for (BusyImportance importance : BusyImportance.values()) {
                     if (active[importance.ordinal()] > 0) {
-                        append(result, new Interval(previous, change.getKey(), importance));
+                        append(result, new IntervalRequest(previous, change.getKey(), importance));
                         break;
                     }
                 }
@@ -70,8 +86,8 @@ public class BusyIntervalNormalizer {
         return List.copyOf(result);
     }
 
-    public boolean noFreeTime(List<Interval> intervals, List<Window> windows) {
-        List<Interval> critical = normalize(intervals.stream()
+    public boolean noFreeTime(List<IntervalRequest> intervals, List<Window> windows) {
+        List<IntervalRequest> critical = normalize(intervals.stream()
                 .filter(i -> i.importance() == BusyImportance.CRITICAL).toList(), windows);
         Duration available = windows.stream().map(w -> Duration.between(w.start(), w.end()))
                 .reduce(Duration.ZERO, Duration::plus);
@@ -80,11 +96,11 @@ public class BusyIntervalNormalizer {
         return blocked.compareTo(available) >= 0;
     }
 
-    private static void append(List<Interval> result, Interval interval) {
+    private static void append(List<IntervalRequest> result, IntervalRequest interval) {
         if (!result.isEmpty()) {
-            Interval last = result.getLast();
+            IntervalRequest last = result.getLast();
             if (last.endsAt().equals(interval.startsAt()) && last.importance() == interval.importance()) {
-                result.set(result.size() - 1, new Interval(last.startsAt(), interval.endsAt(), last.importance()));
+                result.set(result.size() - 1, new IntervalRequest(last.startsAt(), interval.endsAt(), last.importance()));
                 return;
             }
         }

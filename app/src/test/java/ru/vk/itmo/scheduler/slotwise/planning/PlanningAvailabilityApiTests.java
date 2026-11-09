@@ -1,5 +1,7 @@
 package ru.vk.itmo.scheduler.slotwise.planning;
 
+import org.hamcrest.Matchers;
+import java.sql.Timestamp;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,9 +29,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import static ru.vk.itmo.scheduler.slotwise.planning.PlanningApi.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.BusyCalendar.IntervalRequest;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionVersionRequest;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -65,7 +74,7 @@ class PlanningAvailabilityApiTests {
                 .andExpect(jsonPath("$.intervals[0].startsAt").value("2027-01-15T10:10:00Z"))
                 .andExpect(jsonPath("$.intervals[0].endsAt").value("2027-01-15T10:40:00Z"))
                 .andExpect(jsonPath("$.intervals[1].endsAt").value("2027-01-15T11:05:00Z"))
-                .andExpect(jsonPath("$.issues[*].code").value(org.hamcrest.Matchers.hasItem("STUDENT_CRITICAL_IS_SOFT_FOR_GROUP_EVENTS")));
+                .andExpect(jsonPath("$.issues[*].code").value(Matchers.hasItem("STUDENT_CRITICAL_IS_SOFT_FOR_GROUP_EVENTS")));
         assertThat(version(f)).isEqualTo(1);
         mvc.perform(get(f.path("busy-intervals/me")).cookie(f.studentCookie()))
                 .andExpect(jsonPath("$.intervals.length()").value(2));
@@ -89,8 +98,8 @@ class PlanningAvailabilityApiTests {
     @Test
     void submittedCalendarCanBeEditedAndClearedWhileOpen() throws Exception {
         var f = fixture();
-        service.submit(f.id(), f.student());
-        service.saveBusy(f.id(), f.student(), new SaveBusyRequest(1L, List.of(fullDay())));
+        service.submit(f.id(), f.student(), new BusyCalendar.SubmitRequest(service.busy(f.id(), f.student()).revision()));
+        service.saveBusy(f.id(), f.student(), new BusyCalendar.ReplaceRequest("v1", List.of(fullDay())));
         mvc.perform(put(f.path("busy-intervals/me")).cookie(f.studentCookie()).with(xsrf())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"expectedRevision\":\"v2\",\"intervals\":[]}"))
                 .andExpect(status().isOk())
@@ -114,8 +123,8 @@ class PlanningAvailabilityApiTests {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"expectedRevision\":\"v0\",\"intervals\":[]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.knownBusy.length()").value(1))
-                .andExpect(jsonPath("$.issues[*].code").value(org.hamcrest.Matchers.hasItem("NO_FREE_TIME")))
-                .andExpect(jsonPath("$.issues[*].code").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("NO_TIMETABLE"))));
+                .andExpect(jsonPath("$.issues[*].code").value(Matchers.hasItem("NO_FREE_TIME")))
+                .andExpect(jsonPath("$.issues[*].code").value(Matchers.not(Matchers.hasItem("NO_TIMETABLE"))));
         assertThat(jdbc.queryForObject("select count(*) from slotwise.timetable_entry where account_id=?", Integer.class, f.student())).isEqualTo(1);
     }
 
@@ -124,8 +133,8 @@ class PlanningAvailabilityApiTests {
         var f = fixture();
         long teacher = account("TEACHER");
         jdbc.update("insert into slotwise.session_participant(planning_session_id, account_id) values (?, ?)", f.id(), teacher);
-        service.saveBusy(f.id(), f.student(), new SaveBusyRequest(0L, List.of(fullDay())));
-        service.submit(f.id(), f.student());
+        service.saveBusy(f.id(), f.student(), new BusyCalendar.ReplaceRequest("v0", List.of(fullDay())));
+        service.submit(f.id(), f.student(), new BusyCalendar.SubmitRequest(service.busy(f.id(), f.student()).revision()));
         mvc.perform(get(f.path("collection")).cookie(f.ownerCookie()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("OPEN"))
@@ -159,7 +168,7 @@ class PlanningAvailabilityApiTests {
     void deadlineIsEnforcedEvenIfDatabaseStatusHasNotBeenUpdated() throws Exception {
         var f = fixture();
         jdbc.update("update slotwise.planning_session set collection_ends_at=?, collection_status='OPEN' where id=?",
-                java.sql.Timestamp.from(NOW), f.id());
+                Timestamp.from(NOW), f.id());
         mvc.perform(get(f.path("busy-intervals/me")).cookie(f.studentCookie()))
                 .andExpect(jsonPath("$.editable").value(false));
         mvc.perform(post(f.path("busy-intervals/me/submit")).cookie(f.studentCookie()).with(xsrf())
@@ -182,7 +191,7 @@ class PlanningAvailabilityApiTests {
     @Test
     void extendingDeadlinePreservesAnswersAndRejectsInvalidDates() throws Exception {
         var f = fixture();
-        service.submit(f.id(), f.student());
+        service.submit(f.id(), f.student(), new BusyCalendar.SubmitRequest(service.busy(f.id(), f.student()).revision()));
         mvc.perform(patch(f.path("collection")).cookie(f.ownerCookie()).with(xsrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"expectedVersion\":1,\"endsAt\":\"2027-01-13T00:00:00Z\"}"))
@@ -195,7 +204,7 @@ class PlanningAvailabilityApiTests {
                             .content("{\"expectedVersion\":2,\"endsAt\":\"" + end + "\"}"))
                     .andExpect(status().isBadRequest());
         }
-        service.close(f.id(), f.owner());
+        service.close(f.id(), f.owner(), new SessionVersionRequest(service.collection(f.id(), f.owner()).sessionVersion()));
         mvc.perform(patch(f.path("collection")).cookie(f.ownerCookie()).with(xsrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"expectedVersion\":3,\"endsAt\":\"2027-01-14T00:00:00Z\"}"))
@@ -235,7 +244,7 @@ class PlanningAvailabilityApiTests {
     @Test
     void invalidCalendarDoesNotDeletePreviouslySavedData() throws Exception {
         var f = fixture();
-        service.saveBusy(f.id(), f.student(), new SaveBusyRequest(0L, List.of(fullDay())));
+        service.saveBusy(f.id(), f.student(), new BusyCalendar.ReplaceRequest("v0", List.of(fullDay())));
         for (String body : List.of("{\"expectedRevision\":\"v1\",\"intervals\":[null]}", """
                 {"expectedRevision":"v1","intervals":[{"startsAt":"2027-01-15T12:00:00Z",
                 "endsAt":"2027-01-15T11:00:00Z","importance":"LOW"}]}
@@ -245,13 +254,14 @@ class PlanningAvailabilityApiTests {
                     .andExpect(status().isBadRequest());
         }
         assertThat(version(f)).isEqualTo(1);
-        assertThat(service.busy(f.id(), f.student()).intervals()).containsExactly(fullDay());
+        assertThat(service.busy(f.id(), f.student()).intervals().stream()
+                .map(i -> new IntervalRequest(i.startsAt(), i.endsAt(), i.importance())).toList()).containsExactly(fullDay());
     }
 
     @Test
     void staleVersionIsRejectedWithProblemDetails() throws Exception {
         var f = fixture();
-        service.submit(f.id(), f.student());
+        service.submit(f.id(), f.student(), new BusyCalendar.SubmitRequest(service.busy(f.id(), f.student()).revision()));
         mvc.perform(put(f.path("rules")).cookie(f.ownerCookie()).with(xsrf())
                         .contentType(MediaType.APPLICATION_JSON).content(rulesBody(0, 15)))
                 .andExpect(status().isConflict())
@@ -263,7 +273,7 @@ class PlanningAvailabilityApiTests {
     @Test
     void staleCalendarRevisionCannotSaveOrSubmitAndStaleSessionCannotClose() throws Exception {
         var f = fixture();
-        service.saveBusy(f.id(), f.student(), new SaveBusyRequest(0L, List.of(fullDay())));
+        service.saveBusy(f.id(), f.student(), new BusyCalendar.ReplaceRequest("v0", List.of(fullDay())));
         mvc.perform(put(f.path("busy-intervals/me")).cookie(f.studentCookie()).with(xsrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"expectedRevision\":\"v0\",\"intervals\":[]}"))
@@ -311,10 +321,11 @@ class PlanningAvailabilityApiTests {
                     pool.submit(() -> raceSave(f, start)));
             start.countDown();
             assertThat(List.of(tasks.get(0).get(10, TimeUnit.SECONDS), tasks.get(1).get(10, TimeUnit.SECONDS)))
-                    .containsExactlyInAnyOrder("saved", "STALE_INPUT_VERSION");
+                    .containsExactlyInAnyOrder("saved", "STALE_REVISION");
         }
         assertThat(version(f)).isEqualTo(1);
-        assertThat(service.busy(f.id(), f.student()).intervals()).containsExactly(fullDay());
+        assertThat(service.busy(f.id(), f.student()).intervals().stream()
+                .map(i -> new IntervalRequest(i.startsAt(), i.endsAt(), i.importance())).toList()).containsExactly(fullDay());
     }
 
     @Test
@@ -324,7 +335,7 @@ class PlanningAvailabilityApiTests {
         jdbc.update("insert into slotwise.session_participant(planning_session_id,account_id) values (?, ?)", f.id(), teacher);
         Cookie cookie = login(teacher);
         mvc.perform(post(f.path("busy-intervals/me/submit")).cookie(cookie).with(xsrf())
-                        .contentType(MediaType.APPLICATION_JSON).content(revisionBody(f)))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"expectedRevision\":\"v0\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.responseStatus").value("SUBMITTED"));
         mvc.perform(get(f.path("collection")).cookie(cookie)).andExpect(status().isForbidden());
     }
@@ -345,10 +356,45 @@ class PlanningAvailabilityApiTests {
                 .andExpect(jsonPath("$.paths['/api/sessions/{id}/busy-intervals/me'].put.responses['501']").doesNotExist());
     }
 
+    @Test
+    void participantsCanSaveAndSubmitIndependently() throws Exception {
+        var f = fixture();
+        long other = account("TEACHER");
+        jdbc.update("insert into slotwise.session_participant(planning_session_id, account_id) values (?, ?)", f.id(), other);
+        String firstRevision = service.busy(f.id(), f.student()).revision();
+        String otherRevision = service.busy(f.id(), other).revision();
+        var first = service.saveBusy(f.id(), f.student(), new BusyCalendar.ReplaceRequest(firstRevision, List.of(fullDay())));
+        var second = service.saveBusy(f.id(), other, new BusyCalendar.ReplaceRequest(otherRevision, List.of(fullDay())));
+        service.submit(f.id(), f.student(), new BusyCalendar.SubmitRequest(first.revision()));
+        service.submit(f.id(), other, new BusyCalendar.SubmitRequest(second.revision()));
+        assertThat(version(f)).isEqualTo(4);
+        assertThat(service.busy(f.id(), f.student()).revision()).isEqualTo("v2");
+        assertThat(service.busy(f.id(), other).revision()).isEqualTo("v2");
+        assertThat(service.busy(f.id(), other).responseStatus()).isEqualTo(ResponseStatus.SUBMITTED);
+    }
+
+    @Test
+    void ruleDefaultsMatchDomainAndTimeLimitIsBounded() throws Exception {
+        var f = fixture();
+        var defaults = service.rules(f.id(), f.owner());
+        assertThat(defaults.weights().teacherRoomChanges()).isEqualTo(15);
+        assertThat(defaults.weights().movedEvents()).isEqualTo(30);
+        assertThat(defaults.slotMinutes()).isEqualTo(5);
+        mvc.perform(put(f.path("rules")).cookie(f.ownerCookie()).with(xsrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(rulesBody(0, 5).replace("\"timeLimitSeconds\":60", "\"timeLimitSeconds\":301")))
+                .andExpect(status().isBadRequest());
+        assertThat(version(f)).isZero();
+        mvc.perform(put(f.path("rules")).cookie(f.ownerCookie()).with(xsrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(rulesBody(0, 5).replace("\"timeLimitSeconds\":60", "\"timeLimitSeconds\":300")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.timeLimitSeconds").value(300));
+    }
+
     private String raceSave(Fixture f, CountDownLatch start) throws InterruptedException {
         start.await();
         try {
-            service.saveBusy(f.id(), f.student(), new SaveBusyRequest(0L, List.of(fullDay())));
+            service.saveBusy(f.id(), f.student(), new BusyCalendar.ReplaceRequest("v0", List.of(fullDay())));
             return "saved";
         } catch (PlanningException e) {
             return e.getCode();
@@ -397,7 +443,7 @@ class PlanningAvailabilityApiTests {
     }
 
     private String revisionBody(Fixture f) {
-        return "{\"expectedRevision\":\"v" + version(f) + "\"}";
+        return "{\"expectedRevision\":\"" + service.busy(f.id(), f.student()).revision() + "\"}";
     }
 
     private String sessionVersionBody(Fixture f) {
@@ -409,8 +455,8 @@ class PlanningAvailabilityApiTests {
         return jdbc.queryForObject("select input_version from slotwise.planning_session where id=?", Long.class, f.id());
     }
 
-    private static Interval fullDay() {
-        return new Interval(Instant.parse("2027-01-15T09:00:00Z"), Instant.parse("2027-01-15T19:00:00Z"), BusyImportance.CRITICAL);
+    private static IntervalRequest fullDay() {
+        return new IntervalRequest(Instant.parse("2027-01-15T09:00:00Z"), Instant.parse("2027-01-15T19:00:00Z"), BusyImportance.CRITICAL);
     }
 
     private static String rulesBody(long version, int buffer) {

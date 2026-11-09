@@ -38,6 +38,8 @@ public class SessionParticipantEntity {
     @Enumerated(EnumType.STRING)
     private ResponseStatus responseStatus;
 
+    private long calendarRevision;
+
     private Instant submittedAt;
     private Instant lastScheduleViewedAt;
 

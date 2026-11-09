@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
-import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityFacade;
+import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityService;
 import ru.vk.itmo.scheduler.slotwise.planning.api.dto.CollectionResponse;
 import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionVersionRequest;
 
@@ -28,7 +28,7 @@ import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionVersionRequest;
 @RequestMapping(value = ApiPaths.SESSIONS + "/{id}/collection", produces = "application/json")
 @Tag(name = "Availability collection", description = "ORGANIZER owner; status only, no private busy intervals of others")
 public class CollectionController {
-    private final PlanningAvailabilityFacade service;
+    private final PlanningAvailabilityService service;
 
     @GetMapping()
     @Operation(operationId = "getCollection", summary = "Состояние сбора занятости", description = "Shows answered/non-answered people and no-free-window warnings; never exposes private intervals.")
