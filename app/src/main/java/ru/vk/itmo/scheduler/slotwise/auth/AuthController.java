@@ -1,7 +1,5 @@
 package ru.vk.itmo.scheduler.slotwise.auth;
 
-import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -16,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRepository;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 
 /**
  * Login and current user (UX-01). Logout is {@code POST /api/auth/logout}, handled by Spring Security:

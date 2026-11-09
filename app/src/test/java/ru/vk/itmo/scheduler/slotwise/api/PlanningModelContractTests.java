@@ -66,6 +66,18 @@ class PlanningModelContractTests extends ApiContractTestBase {
     }
 
     @Test
+    void requiresNonEmptyCommissionForAChair() throws Exception {
+        String template = TEMPLATE.replace("\"requiresChair\":false", "\"requiresChair\":true");
+        mvc.perform(post("/api/event-types").contentType(MediaType.APPLICATION_JSON).content(template))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'commissionValid')]").isNotEmpty());
+        mvc.perform(put("/api/event-types/1").contentType(MediaType.APPLICATION_JSON)
+                        .content(template.replaceFirst("\\{", "{\"expectedVersion\":0,")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'commissionValid')]").isNotEmpty());
+    }
+
+    @Test
     void supportsAnUnboundedDependencyAndValidatesManualEventDependencies() throws Exception {
         mvc.perform(post("/api/event-types").contentType(MediaType.APPLICATION_JSON)
                         .content(TEMPLATE.replace("\"maxGapDays\":2", "\"maxGapDays\":null")))
@@ -78,6 +90,10 @@ class PlanningModelContractTests extends ApiContractTestBase {
                 """;
         mvc.perform(put("/api/sessions/1/events/2").contentType(MediaType.APPLICATION_JSON).content(event))
                 .andExpect(status().isNotImplemented());
+        mvc.perform(put("/api/sessions/1/events/2").contentType(MediaType.APPLICATION_JSON)
+                        .content(event.replace("\"requiresChair\":false", "\"requiresChair\":true")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'commissionValid')]").isNotEmpty());
         mvc.perform(put("/api/sessions/1/events/2").contentType(MediaType.APPLICATION_JSON)
                         .content(event.replace("\"maxGapDays\":2", "\"maxGapDays\":0")))
                 .andExpect(status().isBadRequest());

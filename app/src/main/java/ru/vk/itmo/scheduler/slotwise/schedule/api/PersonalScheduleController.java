@@ -1,7 +1,5 @@
 package ru.vk.itmo.scheduler.slotwise.schedule.api;
 
-import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -9,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.PersonalScheduleResponse;
 

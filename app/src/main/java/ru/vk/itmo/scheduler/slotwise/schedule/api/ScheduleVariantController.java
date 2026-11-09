@@ -1,7 +1,5 @@
 package ru.vk.itmo.scheduler.slotwise.schedule.api;
 
-import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -16,13 +14,17 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
+import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentCandidate;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentUpdateRequest;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentUpdateResponse;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.PublishVariantRequest;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.VariantResponse;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.VariantSummaryResponse;
+
+import java.util.List;
 
 @RestController
 @RequestMapping(produces = "application/json")
@@ -50,6 +52,18 @@ public class ScheduleVariantController {
                     + "diagnostics and do not claim a unique cause. Stale data and missing respondents are explicit. "
                     + "FEASIBLE does not claim optimality; bound and gap are null when unknown.")
     public VariantResponse getVariant(@PathVariable("id") @Min(1) long id) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping(ApiPaths.VARIANTS + "/{id}/assignments/{eventId}/candidates")
+    @Operation(operationId = "listAssignmentCandidates", summary = "List feasible placements for an event",
+            description = "ORGANIZER owner only. Lists distinct start time and room pairs that satisfy all hard "
+                    + "constraints for the event with every other assignment held fixed. Reuses the event's existing "
+                    + "commission, if present. Otherwise a pair is eligible if a valid commission can be selected "
+                    + "from the session pool when the event requires one. Returns an empty list if no pair is "
+                    + "feasible. The query does not change the variant. Inaccessible variants and unknown events return 404.")
+    public List<AssignmentCandidate> listAssignmentCandidates(@PathVariable("id") @Min(1) long id,
+                                                               @PathVariable("eventId") @Min(1) long eventId) {
         throw ContractStub.notImplemented();
     }
 

@@ -1,7 +1,5 @@
 package ru.vk.itmo.scheduler.slotwise.account.api;
 
-import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -26,6 +24,7 @@ import ru.vk.itmo.scheduler.slotwise.account.api.dto.SetAccountEnabledRequest;
 import ru.vk.itmo.scheduler.slotwise.account.api.dto.SetAccountPasswordRequest;
 import ru.vk.itmo.scheduler.slotwise.account.api.dto.SetAccountRoleRequest;
 import ru.vk.itmo.scheduler.slotwise.account.api.dto.UpdateAccountRequest;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
 

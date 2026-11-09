@@ -46,6 +46,7 @@ class SolvingScheduleContractTests extends ApiContractTestBase {
                 get("/api/jobs/1"),
                 get("/api/sessions/1/variants").param("page", "0").param("size", "100"),
                 get("/api/variants/1"),
+                get("/api/variants/1/assignments/2/candidates"),
                 patch("/api/variants/1/assignments/2").content(ASSIGNMENT),
                 patch("/api/variants/1/assignments/2").param("dryRun", "true").content(ASSIGNMENT),
                 patch("/api/variants/1/assignments/2").content("""
@@ -79,6 +80,7 @@ class SolvingScheduleContractTests extends ApiContractTestBase {
                 SOLVE.replace("\"algorithm\":\"CP_SAT\"", "\"algorithm\":null"),
                 SOLVE.replace("\"algorithm\":\"CP_SAT\"", "\"algorithm\":\"UNKNOWN\""),
                 SOLVE.replace("\"timeLimitSeconds\":1", "\"timeLimitSeconds\":0"),
+                SOLVE.replace("\"timeLimitSeconds\":1", "\"timeLimitSeconds\":301"),
                 SOLVE.replace("\"seed\":-1", "\"seed\":null"),
                 SOLVE.replace("\"seed\":-1", "\"seed\":0,\"baseVariantId\":0"));
     }
