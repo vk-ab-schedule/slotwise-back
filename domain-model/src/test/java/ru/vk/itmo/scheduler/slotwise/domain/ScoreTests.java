@@ -24,7 +24,7 @@ class ScoreTests {
     @Test
     void resultIsSortedByEvent() {
         SolveResult result = new SolveResult(SolveStatus.FEASIBLE,
-                List.of(new Assignment(2, 0, Venue.ONLINE, List.of()), new Assignment(1, 0, Venue.ONLINE, List.of())),
+                List.of(new Assignment(2, 0, new Venue.Online(11), List.of()), new Assignment(1, 0, new Venue.Online(11), List.of())),
                 Optional.of(new Score(0, 5)), OptionalLong.empty(), Duration.ofSeconds(1));
 
         assertThat(result.assignments()).extracting(Assignment::eventId).containsExactly(1L, 2L);
@@ -32,7 +32,7 @@ class ScoreTests {
 
     @Test
     void resultRejectsEventAssignedTwice() {
-        Assignment assignment = new Assignment(1, 0, Venue.ONLINE, List.of());
+        Assignment assignment = new Assignment(1, 0, new Venue.Online(11), List.of());
 
         assertThatIllegalArgumentException().isThrownBy(() -> new SolveResult(SolveStatus.FEASIBLE,
                 List.of(assignment, assignment), Optional.of(new Score(0, 0)), OptionalLong.empty(), Duration.ZERO));
