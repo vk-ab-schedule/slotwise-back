@@ -28,6 +28,8 @@ import java.util.Optional;
 @EqualsAndHashCode
 @ToString
 public final class TimeGrid {
+    public static final int DEFAULT_SLOT_MINUTES = 5;
+
     private final Instant origin;
     private final ZoneId zone;
     private final int slotMinutes;
