@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -57,6 +58,8 @@ class OpenApiContractTests extends ApiContractTestBase {
                 .andExpect(jsonPath("$.paths['/api/sessions/{id}/solve'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/jobs/{id}'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/variants/{id}/assignments/{eventId}'].patch").exists())
+                .andExpect(jsonPath("$.paths['/api/variants/{id}/assignments/{eventId}/candidates'].get.responses['200'].content['application/json'].schema.items['$ref']")
+                        .value("#/components/schemas/AssignmentCandidate"))
                 .andExpect(jsonPath("$.paths['/api/variants/{id}/publish'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/me/schedule'].get").exists());
     }
@@ -78,6 +81,19 @@ class OpenApiContractTests extends ApiContractTestBase {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.fieldErrors").isArray());
+    }
+
+    @Test
+    void sessionWorkingHoursMustAlignWithTheGrid() throws Exception {
+        mvc.perform(post("/api/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_SESSION.replace("09:00:00", "09:02:00")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'workingDayAligned')]").isNotEmpty());
+        mvc.perform(patch("/api/sessions/1").contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_SESSION.replace("{", "{\"expectedVersion\":0,")
+                                .replace("19:00:00", "19:00:00.001")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'workingDayAligned')]").isNotEmpty());
     }
 
     @Test

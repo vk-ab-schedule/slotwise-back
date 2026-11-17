@@ -1,7 +1,5 @@
 package ru.vk.itmo.scheduler.slotwise.university.api;
 
-import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -12,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityDemoDataRequest;
 import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityDemoDataResponse;

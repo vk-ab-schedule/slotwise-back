@@ -17,7 +17,7 @@ import java.util.List;
 public record ScheduleMetrics(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true,
                 description = "Validated soft penalty P, the sum of S1-S5 weighted penalties; null if no solution was obtained")
-        BigDecimal penalty,
+        Long penalty,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0") int hardViolations,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0",
                 description = "Unassigned-event count U; minimized before soft penalty P") int unassignedEvents,

@@ -1,30 +1,29 @@
 package ru.vk.itmo.scheduler.slotwise.planning.api;
 
-import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-
 import io.swagger.v3.oas.annotations.Operation;
-import org.springframework.security.access.prepost.PreAuthorize;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
-import ru.vk.itmo.scheduler.slotwise.planning.api.dto.PlanningSessionResponse;
 import ru.vk.itmo.scheduler.slotwise.planning.api.dto.CreatePlanningSessionRequest;
-import ru.vk.itmo.scheduler.slotwise.planning.api.dto.UpdatePlanningSessionRequest;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.PlanningSessionResponse;
 import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionSelection;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.UpdatePlanningSessionRequest;
 
 @RestController
 @RequestMapping(value = ApiPaths.SESSIONS, produces = "application/json")

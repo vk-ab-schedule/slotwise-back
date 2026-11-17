@@ -1,7 +1,5 @@
 package ru.vk.itmo.scheduler.slotwise.university.api;
 
-import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
@@ -10,10 +8,12 @@ import jakarta.validation.constraints.Size;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRole;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
 import ru.vk.itmo.scheduler.slotwise.common.api.PersonSummary;
@@ -23,6 +23,9 @@ import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityGroupResponse;
 import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityRoomResponse;
 import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversitySupervisionResponse;
 import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityTeachingResponse;
+import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityTimetableEntryResponse;
+
+import java.time.Instant;
 
 @RestController
 @RequestMapping(value = ApiPaths.UNIVERSITY, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -106,6 +109,74 @@ public class UniversityCatalogController {
             @RequestParam(name = "search", required = false) @Size(max = 255) String search,
             @RequestParam(name = "studentId", required = false) @Min(1) Long studentId,
             @RequestParam(name = "supervisorId", required = false) @Min(1) Long supervisorId) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/timetable")
+    @Operation(operationId = "listUniversityTimetable", summary = "List timetable")
+    public PageResponse<UniversityTimetableEntryResponse> listUniversityTimetable(
+            @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+            @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size,
+            @RequestParam(name = "search", required = false) @Size(max = 255) String search,
+            @RequestParam(name = "accountId", required = false) @Min(1) Long accountId,
+            @RequestParam(name = "roomId", required = false) @Min(1) Long roomId,
+            @RequestParam(name = "startsAt", required = false) Instant startsAt,
+            @RequestParam(name = "endsAt", required = false) Instant endsAt) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/groups/{id}")
+    @Operation(operationId = "getUniversityGroup", summary = "Get groups record")
+    public UniversityGroupResponse getUniversityGroup(
+            @PathVariable("id") @Min(1) long id) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/rooms/{id}")
+    @Operation(operationId = "getUniversityRoom", summary = "Get rooms record")
+    public UniversityRoomResponse getUniversityRoom(
+            @PathVariable("id") @Min(1) long id) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/disciplines/{id}")
+    @Operation(operationId = "getUniversityDiscipline", summary = "Get disciplines record")
+    public UniversityDisciplineResponse getUniversityDiscipline(
+            @PathVariable("id") @Min(1) long id) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/equipment/{id}")
+    @Operation(operationId = "getUniversityEquipment", summary = "Get equipment record")
+    public UniversityEquipmentResponse getUniversityEquipment(
+            @PathVariable("id") @Min(1) long id) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/timetable/{id}")
+    @Operation(operationId = "getUniversityTimetableEntry", summary = "Get timetable record")
+    public UniversityTimetableEntryResponse getUniversityTimetableEntry(
+            @PathVariable("id") @Min(1) long id) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/people/{id}")
+    @Operation(operationId = "getUniversityPerson", summary = "Get university person")
+    public PersonSummary getUniversityPerson(@PathVariable("id") @Min(1) long id) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/teachings/{id}")
+    @Operation(operationId = "getUniversityTeaching", summary = "Get university teaching")
+    public UniversityTeachingResponse getUniversityTeaching(@PathVariable("id") @Min(1) long id) {
+        throw ContractStub.notImplemented();
+    }
+
+    @GetMapping("/supervisions/{studentId}/{supervisorId}")
+    @Operation(operationId = "getUniversitySupervision", summary = "Get supervision")
+    public UniversitySupervisionResponse getUniversitySupervision(
+            @PathVariable("studentId") @Min(1) long studentId,
+            @PathVariable("supervisorId") @Min(1) long supervisorId) {
         throw ContractStub.notImplemented();
     }
 }

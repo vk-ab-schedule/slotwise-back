@@ -1,18 +1,19 @@
 package ru.vk.itmo.scheduler.slotwise.planning.api.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
+import ru.vk.itmo.scheduler.slotwise.common.api.MultipleOf;
+import ru.vk.itmo.scheduler.slotwise.eventtype.EventFormat;
 
 import java.util.List;
 import java.util.Set;
-
-import ru.vk.itmo.scheduler.slotwise.common.api.MultipleOf;
-import ru.vk.itmo.scheduler.slotwise.eventtype.EventFormat;
 
 @Schema(description = "Replace the complete editable event form. Dependencies must remain acyclic; business validation is implemented by B5.")
 public record UpdateEventRequest(@NotNull @PositiveOrZero Long expectedVersion,
@@ -26,4 +27,11 @@ public record UpdateEventRequest(@NotNull @PositiveOrZero Long expectedVersion,
                                  @NotNull List<@Valid @NotNull EventParticipant> participants,
                                  @NotNull Set<@NotNull @Min(1) Long> equipmentIds,
                                  @NotNull List<@Valid @NotNull EventPredecessor> dependencies) {
+
+    @AssertTrue(message = "commissionSize must be positive when requiresChair is true")
+    @JsonIgnore
+    @Schema(hidden = true)
+    public boolean isCommissionValid() {
+        return !Boolean.TRUE.equals(requiresChair) || commissionSize == null || commissionSize > 0;
+    }
 }

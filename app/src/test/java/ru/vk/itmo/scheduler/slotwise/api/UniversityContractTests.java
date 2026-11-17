@@ -29,9 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class UniversityContractTests extends ApiContractTestBase {
     private static final List<String> CATALOGS = List.of("people", "groups", "rooms", "disciplines",
-            "equipment", "teachings", "supervisions");
-    private static final List<String> ADMIN_CATALOGS = List.of("groups", "rooms", "disciplines", "equipment",
-            "teachings", "supervisions", "timetable");
+            "equipment", "teachings", "supervisions", "timetable");
     private static final String TIMETABLE = """
             {"accountId":1,"startsAt":"2026-06-15T06:50:00Z","endsAt":"2026-06-15T08:20:00Z",
              "description":"Lecture"}
@@ -84,11 +82,11 @@ class UniversityContractTests extends ApiContractTestBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"groups", "rooms", "disciplines", "equipment", "timetable"})
-    void adminDetailRejectsNonPositiveIds(String resource) throws Exception {
-        mvc.perform(get("/api/admin/" + resource + "/1")).andExpect(status().isNotImplemented());
-        mvc.perform(get("/api/admin/" + resource + "/0")).andExpect(status().isBadRequest());
-        mvc.perform(get("/api/admin/" + resource + "/-1")).andExpect(status().isBadRequest());
+    @ValueSource(strings = {"people", "groups", "rooms", "disciplines", "equipment", "teachings", "timetable"})
+    void catalogDetailRejectsNonPositiveIds(String resource) throws Exception {
+        mvc.perform(get("/api/university/" + resource + "/1")).andExpect(status().isNotImplemented());
+        mvc.perform(get("/api/university/" + resource + "/0")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/university/" + resource + "/-1")).andExpect(status().isBadRequest());
     }
 
     @ParameterizedTest
@@ -135,6 +133,19 @@ class UniversityContractTests extends ApiContractTestBase {
     }
 
     @Test
+    void importsOnlinePlatformWithoutCapacityAndRejectsInconsistentCapacity() throws Exception {
+        mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
+                        .content(IMPORT.replace("\"capacity\":30", "\"online\":true,\"capacity\":null")))
+                .andExpect(status().isNotImplemented());
+        mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
+                        .content(IMPORT.replace("\"capacity\":30", "\"online\":true,\"capacity\":30")))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
+                        .content(IMPORT.replace("\"capacity\":30", "\"capacity\":null")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void nestedImportValidationDoesNotEchoCredentials() throws Exception {
         mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
                         .content(IMPORT.replace("{bcrypt}$2a$10$contract-secret", "plain-contract-secret")))
@@ -178,6 +189,13 @@ class UniversityContractTests extends ApiContractTestBase {
         assertRequired(document, "UniversityRoomResponse", "building", "capacity", "online", "equipmentIds");
         assertRequired(document, "UniversityTimetableEntryResponse", "accountId", "roomId", "description", "startsAt", "endsAt");
         assertRequired(document, "UniversityImportResponse", "dryRun", "allowPartial", "applied", "summary", "sections", "diagnostics");
+        Map<String, Map<String, Object>> paths = document.read("$.paths");
+        for (String resource : CATALOGS) {
+            String adminPath = "/api/admin/" + resource;
+            assertTrue(paths.entrySet().stream()
+                    .filter(entry -> entry.getKey().equals(adminPath) || entry.getKey().startsWith(adminPath + "/"))
+                    .noneMatch(entry -> entry.getValue().containsKey("get")), adminPath);
+        }
         for (String resource : List.of("groups", "rooms", "disciplines", "equipment", "timetable")) {
             assertNotNull(document.read("$.paths['/api/admin/" + resource + "'].post.responses['201']"));
             assertNotNull(document.read("$.paths['/api/admin/" + resource + "/{id}'].delete.responses['204']"));
@@ -256,8 +274,7 @@ class UniversityContractTests extends ApiContractTestBase {
     }
 
     private static Stream<String> catalogPaths() {
-        return Stream.concat(CATALOGS.stream().map(name -> "/api/university/" + name),
-                ADMIN_CATALOGS.stream().map(name -> "/api/admin/" + name));
+        return CATALOGS.stream().map(name -> "/api/university/" + name);
     }
 
     private static Stream<Arguments> invalidCatalogQueries() {
@@ -314,6 +331,6 @@ class UniversityContractTests extends ApiContractTestBase {
                 Arguments.of("/api/university/rooms", "minCapacity", "0"),
                 Arguments.of("/api/university/teachings", "teacherId", "0"),
                 Arguments.of("/api/university/supervisions", "supervisorId", "0"),
-                Arguments.of("/api/admin/timetable", "accountId", "0"));
+                Arguments.of("/api/university/timetable", "accountId", "0"));
     }
 }

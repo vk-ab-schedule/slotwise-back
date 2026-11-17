@@ -1,40 +1,38 @@
 package ru.vk.itmo.scheduler.slotwise.common;
 
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
-import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatusCode;
-import org.springframework.web.ErrorResponse;
-import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.context.request.WebRequest;
-import org.springframework.web.method.annotation.HandlerMethodValidationException;
-import org.springframework.validation.method.ParameterErrors;
-import ru.vk.itmo.scheduler.slotwise.common.api.FieldViolation;
-
-import java.util.Objects;
-
-import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.validation.method.ParameterErrors;
+import org.springframework.web.ErrorResponse;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import ru.vk.itmo.scheduler.slotwise.common.api.FieldViolation;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningException;
+
+import java.util.Objects;
 
 /**
  * The single place where exceptions become Problem Details (RFC 9457).
  *
  * <p>Besides the standard fields, every problem raised here has a stable {@code code} for the frontend.
  */
+@Slf4j
 @RestControllerAdvice
 class ApiExceptionHandler extends ResponseEntityExceptionHandler {
-
-    private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(@NonNull Exception e,
@@ -96,7 +94,7 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     ProblemDetail handleUnexpected(Exception e) {
-        LOG.error("Unhandled API failure", e);
+        log.error("Unhandled API failure", e);
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Внутренняя ошибка сервера");
     }
 
