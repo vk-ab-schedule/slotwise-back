@@ -159,9 +159,6 @@ public class PlanningAvailabilityService {
         if (request.roomChangeBufferMinutes() % TimeGrid.DEFAULT_SLOT_MINUTES != 0) {
             throw invalid("INVALID_BUFFER", "Буфер должен быть кратен длине слота");
         }
-        if (request.timeLimitSeconds() < 1 || request.timeLimitSeconds() > 300) {
-            throw invalid("INVALID_TIME_LIMIT", "Лимит времени должен быть от 1 до 300 секунд");
-        }
         var entity = rules.findById(id).orElse(null);
         var before = rulesResponse(session, entity);
         var desired = new SessionRules.Response(session.getVersion(), session.getInputVersion(), TimeGrid.DEFAULT_SLOT_MINUTES, request.weights(),
