@@ -1,6 +1,7 @@
 package ru.vk.itmo.scheduler.slotwise.domain.validation;
 
 import ru.vk.itmo.scheduler.slotwise.domain.Assignment;
+import ru.vk.itmo.scheduler.slotwise.domain.BusyRules;
 import ru.vk.itmo.scheduler.slotwise.domain.CommissionCandidate;
 import ru.vk.itmo.scheduler.slotwise.domain.Dependency;
 import ru.vk.itmo.scheduler.slotwise.domain.Event;
@@ -10,14 +11,15 @@ import ru.vk.itmo.scheduler.slotwise.domain.Room;
 import ru.vk.itmo.scheduler.slotwise.domain.Score;
 import ru.vk.itmo.scheduler.slotwise.domain.SlotRange;
 import ru.vk.itmo.scheduler.slotwise.domain.TimeGrid;
-import ru.vk.itmo.scheduler.slotwise.domain.Venue;
 import ru.vk.itmo.scheduler.slotwise.domain.Weights;
+import ru.vk.itmo.scheduler.slotwise.domain.validation.Violation.Reason;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -25,6 +27,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The single source of truth about a schedule (MODEL.md, «Валидатор — источник истины»): finds violations
@@ -35,17 +38,14 @@ import java.util.stream.Collectors;
  * unknown events, rooms and people become violations, not exceptions.
  */
 public final class ScheduleValidator {
-    private static final int MEDIUM_COEFFICIENT = 3;
-    private static final int LOW_COEFFICIENT = 1;
-    private static final int STUDENT_CRITICAL_IN_GROUP_COEFFICIENT = 10;
-
     private final Problem problem;
     private final TimeGrid grid;
     private final Map<Long, Event> events;
     private final Map<Long, Room> rooms;
     private final Map<Long, Person> people;
     private final Map<Long, CommissionCandidate> pool;
-    private final List<Violation> violations = new ArrayList<>();
+    /** Violations with the same reason, events, rooms and message are merged into one with all their people. */
+    private final Map<List<Object>, Violation> violations = new LinkedHashMap<>();
     /** Known events with one assignment each; the ones that fit the grid are also in {@link #placed}. */
     private final Map<Long, Assignment> assigned = new TreeMap<>();
     private final List<Placement> placed = new ArrayList<>();
@@ -53,13 +53,11 @@ public final class ScheduleValidator {
     private final Set<Long> undesirableEvents = new HashSet<>();
     private long undesirableMinutes;
 
-    /** An assignment that fits the grid; roomId is null for an online platform. */
-    private record Placement(Event event, Assignment assignment, SlotRange range, int day, Long roomId) {
+    /** An assignment that fits the grid; physicalRoom is null for an online platform or an unknown room. */
+    private record Placement(Event event, Assignment assignment, SlotRange range, int day, Long physicalRoom) {
         List<Long> people() {
             // Distinct: a participant wrongly put on the commission is still one person (reported by H6).
-            List<Long> people = new ArrayList<>(event.participants());
-            people.addAll(assignment.commission());
-            return people.stream().distinct().toList();
+            return Stream.concat(event.participants().stream(), assignment.commission().stream()).distinct().toList();
         }
     }
 
@@ -87,81 +85,73 @@ public final class ScheduleValidator {
         Map<SoftConstraint, Long> raw = new EnumMap<>(SoftConstraint.class);
         raw.put(SoftConstraint.S1, teacherDays(this::gaps));
         long[] loads = commissionLoads();
-        raw.put(SoftConstraint.S2, loads.length == 0 ? 0 : max(loads) - min(loads));
+        raw.put(SoftConstraint.S2, Arrays.stream(loads).max().orElse(0) - Arrays.stream(loads).min().orElse(0));
         raw.put(SoftConstraint.S3, undesirableMinutes);
         raw.put(SoftConstraint.S4, teacherDays(this::roomSwitches));
         raw.put(SoftConstraint.S5, moves());
         Weights w = problem.weights();
-        long penalty = w.gaps() * raw.get(SoftConstraint.S1) + w.unfairness() * raw.get(SoftConstraint.S2)
-                + w.undesirable() * raw.get(SoftConstraint.S3) + w.roomSwitches() * raw.get(SoftConstraint.S4)
-                + w.moves() * raw.get(SoftConstraint.S5);
+        long penalty = w.teacherGaps() * raw.get(SoftConstraint.S1)
+                + w.commissionLoadSpread() * raw.get(SoftConstraint.S2)
+                + w.undesirableTime() * raw.get(SoftConstraint.S3)
+                + w.teacherRoomChanges() * raw.get(SoftConstraint.S4)
+                + w.movedEvents() * raw.get(SoftConstraint.S5);
         Score score = new Score(events.size() - assigned.size(), penalty);
-        return new Validation(violations, score, raw, standardDeviation(loads), undesirableEvents.size());
+        return new Validation(List.copyOf(violations.values()), score, raw, standardDeviation(loads), undesirableEvents.size());
     }
 
     private void accept(Assignment assignment) {
         Event event = events.get(assignment.eventId());
         if (event == null) {
-            violation(HardConstraint.H1, "Назначено неизвестное событие " + assignment.eventId(),
-                    List.of(assignment.eventId()), List.of(), List.of());
+            violation(Reason.UNKNOWN_EVENT, "Назначено событие, которого нет в сессии", List.of(assignment.eventId()));
             return;
         }
         if (assigned.putIfAbsent(event.id(), assignment) != null) {
-            violation(HardConstraint.H1, "Событие " + event.id() + " назначено больше одного раза",
-                    List.of(event.id()), List.of(), List.of());
+            violation(Reason.DUPLICATE_ASSIGNMENT, "Событие назначено больше одного раза", List.of(event.id()));
             return;
         }
         SlotRange range = SlotRange.ofLength(assignment.start(), event.duration());
-        if (range.end() > grid.slotCount() || !grid.fitsWorkingPeriod(assignment.start(), event.duration())) {
-            violation(HardConstraint.H8, "Событие " + event.id() + " выходит за рабочее время сессии",
-                    List.of(event.id()), List.of(), List.of());
-            if (range.end() > grid.slotCount()) {
+        boolean inGrid = range.end() <= grid.slotCount();
+        if (!inGrid || !grid.fitsWorkingPeriod(assignment.start(), event.duration())) {
+            violation(Reason.OUTSIDE_WORKING_HOURS, "Событие выходит за рабочее время сессии", List.of(event.id()));
+            if (!inGrid) {
                 return;
             }
         }
-        Long roomId = checkVenue(event, assignment);
+        Long physicalRoom = checkRoom(event, assignment);
         checkCommission(event, assignment);
-        Placement placement = new Placement(event, assignment, range, grid.dayOf(range.start()), roomId);
+        Placement placement = new Placement(event, assignment, range, grid.dayOf(range.start()), physicalRoom);
         placed.add(placement);
-        for (long person : placement.people()) {
-            if (people.containsKey(person)) {
-                byPerson.computeIfAbsent(person, _ -> new ArrayList<>()).add(placement);
-            } else {
-                violation(HardConstraint.H6, "В событии " + event.id() + " неизвестный участник " + person,
-                        List.of(event.id()), List.of(person), List.of());
-            }
-        }
+        // Unknown commission members are already reported by H6.
+        placement.people().stream().filter(people::containsKey)
+                .forEach(person -> byPerson.computeIfAbsent(person, _ -> new ArrayList<>()).add(placement));
     }
 
     /** H5. Returns the physical room id, or null for an online platform or an unknown room. */
-    private Long checkVenue(Event event, Assignment assignment) {
-        long roomId = assignment.venue().roomId();
+    private Long checkRoom(Event event, Assignment assignment) {
+        long roomId = assignment.roomId();
         Room room = rooms.get(roomId);
         List<Long> eventIds = List.of(event.id());
-        if (room == null || room.online() != (assignment.venue() instanceof Venue.Online)) {
-            violation(HardConstraint.H5, "Событие " + event.id() + " назначено в неизвестную площадку " + roomId,
-                    eventIds, List.of(), List.of(roomId));
+        if (room == null) {
+            violation(Reason.UNKNOWN_ROOM, "Событие назначено в аудиторию, которой нет в сессии", eventIds, List.of(), List.of(roomId));
             return null;
         }
         if (event.format() == Event.Format.ONLINE && !room.online()) {
-            violation(HardConstraint.H5, "Онлайн-событие " + event.id() + " назначено в аудиторию",
+            violation(Reason.ONLINE_EVENT_IN_ROOM, "Онлайн-событие назначено в аудиторию, а не на онлайн-площадку",
                     eventIds, List.of(), List.of(roomId));
         }
         if (event.format() != Event.Format.ONLINE && room.online()) {
-            violation(HardConstraint.H5, "Очное событие " + event.id() + " назначено на онлайн-площадку",
-                    eventIds, List.of(), List.of(roomId));
+            violation(Reason.ONSITE_EVENT_ONLINE, "Очное событие назначено на онлайн-площадку", eventIds, List.of(), List.of(roomId));
         }
         if (room.online()) {
             return null;
         }
         int people = event.participants().size() + assignment.commission().size();
         if (people > room.capacity()) {
-            violation(HardConstraint.H5, "В аудитории " + roomId + " " + room.capacity() + " мест, а в событии "
-                    + event.id() + " участников: " + people, eventIds, List.of(), List.of(roomId));
+            violation(Reason.ROOM_TOO_SMALL, "В аудитории " + room.capacity() + " мест, а участников вместе с комиссией " + people,
+                    eventIds, List.of(), List.of(roomId));
         }
         if (!room.equipment().containsAll(event.equipment())) {
-            violation(HardConstraint.H5, "В аудитории " + roomId + " нет оборудования для события " + event.id(),
-                    eventIds, List.of(), List.of(roomId));
+            violation(Reason.ROOM_LACKS_EQUIPMENT, "В аудитории нет нужного для события оборудования", eventIds, List.of(), List.of(roomId));
         }
         return roomId;
     }
@@ -171,44 +161,42 @@ public final class ScheduleValidator {
         List<Long> members = assignment.commission();
         List<Long> eventIds = List.of(event.id());
         if (members.size() != requirement.size()) {
-            violation(HardConstraint.H6, "В комиссии события " + event.id() + " " + members.size()
-                    + " чел. вместо " + requirement.size(), eventIds, members, List.of());
+            violation(Reason.COMMISSION_SIZE, "В комиссии " + members.size() + " чел. вместо " + requirement.size(),
+                    eventIds, members, List.of());
         }
-        List<Long> wrong = members.stream().filter(member -> !pool.containsKey(member)
+        List<Long> notAllowed = members.stream().filter(member -> !pool.containsKey(member)
                 || event.participants().contains(member) || event.commissionExcluded().contains(member)).toList();
-        if (!wrong.isEmpty()) {
-            violation(HardConstraint.H6, "В комиссию события " + event.id() + " нельзя включать " + wrong,
-                    eventIds, wrong, List.of());
+        if (!notAllowed.isEmpty()) {
+            violation(Reason.COMMISSION_MEMBER_NOT_ALLOWED,
+                    "В комиссии люди не из пула, участники события или исключённые для этого события", eventIds, notAllowed, List.of());
         }
         // A named chair must be able to chair; chairRequired only decides whether the chair may be absent.
         OptionalLong chair = assignment.chair();
         if (chair.isPresent() && !(pool.containsKey(chair.getAsLong()) && pool.get(chair.getAsLong()).canChair())) {
-            violation(HardConstraint.H6, "Участник " + chair.getAsLong() + " не может председательствовать в комиссии события "
-                    + event.id(), eventIds, List.of(chair.getAsLong()), List.of());
+            violation(Reason.CHAIR_NOT_ALLOWED, "У председателя нет права председательствовать",
+                    eventIds, List.of(chair.getAsLong()), List.of());
         } else if (chair.isEmpty() && requirement.chairRequired()) {
-            violation(HardConstraint.H6, "У комиссии события " + event.id() + " нет председателя", eventIds, List.of(), List.of());
+            violation(Reason.CHAIR_MISSING, "У комиссии нет председателя", eventIds);
         }
     }
 
     private void checkPinned() {
         for (Assignment pin : problem.pinned()) {
             if (!pin.equals(assigned.get(pin.eventId()))) {
-                violation(HardConstraint.H9, "Закреплённое событие " + pin.eventId() + " изменено",
-                        List.of(pin.eventId()), List.of(), List.of());
+                violation(Reason.PINNED_CHANGED, "Закреплённое назначение изменено", List.of(pin.eventId()));
             }
         }
     }
 
     private void checkRooms() {
-        Map<Long, List<Placement>> byRoom = placed.stream().filter(p -> p.roomId() != null)
-                .collect(Collectors.groupingBy(Placement::roomId, TreeMap::new, Collectors.toList()));
+        Map<Long, List<Placement>> byRoom = placed.stream().filter(p -> p.physicalRoom() != null)
+                .collect(Collectors.groupingBy(Placement::physicalRoom, TreeMap::new, Collectors.toList()));
         byRoom.forEach((roomId, placements) -> {
-            forOverlaps(placements, (a, b) -> violation(HardConstraint.H3, "Аудитория " + roomId + " занята событиями "
-                    + a.event().id() + " и " + b.event().id() + " одновременно",
+            forOverlaps(placements, (a, b) -> violation(Reason.ROOM_DOUBLE_BOOKED, "В аудитории одновременно два события",
                     List.of(a.event().id(), b.event().id()), List.of(), List.of(roomId)));
             for (Placement placement : placements) {
                 if (rooms.get(roomId).busy().stream().anyMatch(placement.range()::overlaps)) {
-                    violation(HardConstraint.H3, "Событие " + placement.event().id() + " попадает на пару в аудитории " + roomId,
+                    violation(Reason.ROOM_HAS_CLASSES, "Событие попадает на пару в аудитории",
                             List.of(placement.event().id()), List.of(), List.of(roomId));
                 }
             }
@@ -218,50 +206,44 @@ public final class ScheduleValidator {
     /** H2, H4 and the S3 penalty. */
     private void checkPeople() {
         byPerson.forEach((personId, placements) -> {
-            Person person = people.get(personId);
-            forOverlaps(placements, (a, b) -> violation(HardConstraint.H2, "Участник " + personId + " одновременно в событиях "
-                    + a.event().id() + " и " + b.event().id(),
+            forOverlaps(placements, (a, b) -> violation(Reason.PERSON_DOUBLE_BOOKED, "Участники в двух событиях одновременно",
                     List.of(a.event().id(), b.event().id()), List.of(personId), List.of()));
-            List<Placement> onsite = sortedByStart(placements.stream().filter(p -> p.roomId() != null).toList());
+            List<Placement> onsite = sortedByStart(placements.stream().filter(p -> p.physicalRoom() != null).toList());
             for (int i = 1; i < onsite.size(); i++) {
                 Placement before = onsite.get(i - 1);
                 Placement after = onsite.get(i);
                 int gap = after.range().start() - before.range().end();
-                if (gap >= 0 && gap < problem.roomChangeBuffer() && !before.roomId().equals(after.roomId())) {
-                    violation(HardConstraint.H2, "Участнику " + personId + " не хватает времени перейти из аудитории "
-                            + before.roomId() + " в " + after.roomId(), List.of(before.event().id(), after.event().id()),
-                            List.of(personId), List.of(before.roomId(), after.roomId()));
+                if (gap >= 0 && gap < problem.roomChangeBuffer() && !before.physicalRoom().equals(after.physicalRoom())) {
+                    violation(Reason.NO_TIME_TO_CHANGE_ROOM, "Между событиями в разных аудиториях меньше "
+                            + grid.toMinutes(problem.roomChangeBuffer()) + " мин на переход",
+                            List.of(before.event().id(), after.event().id()), List.of(personId),
+                            List.of(before.physicalRoom(), after.physicalRoom()));
                 }
             }
             for (Placement placement : placements) {
-                checkBusy(person, placement);
+                checkBusy(people.get(personId), placement);
             }
         });
     }
 
     private void checkBusy(Person person, Placement placement) {
         SlotRange range = placement.range();
-        // Overlapping soft busy time counts once with the highest coefficient, as in the busy calendar (UX-09).
+        Event.Scope scope = placement.event().scope();
         int[] coefficients = new int[range.length()];
         for (Person.Busy busy : person.busy()) {
             if (!busy.range().overlaps(range)) {
                 continue;
             }
-            boolean studentInGroupEvent = person.role() == Person.Role.STUDENT && placement.event().scope() == Event.Scope.GROUP;
-            int coefficient = switch (busy.kind()) {
-                case TIMETABLE -> 0;
-                case CRITICAL -> studentInGroupEvent ? STUDENT_CRITICAL_IN_GROUP_COEFFICIENT : 0;
-                case MEDIUM -> MEDIUM_COEFFICIENT;
-                case LOW -> LOW_COEFFICIENT;
-            };
-            if (coefficient == 0) {
-                violation(HardConstraint.H4, "Событие " + placement.event().id() + " попадает на "
-                        + (busy.kind() == Person.Busy.Kind.TIMETABLE ? "пару" : "критическую занятость")
-                        + " участника " + person.id(), List.of(placement.event().id()), List.of(person.id()), List.of());
-            } else {
-                for (int slot = Math.max(busy.range().start(), range.start()); slot < Math.min(busy.range().end(), range.end()); slot++) {
-                    coefficients[slot - range.start()] = Math.max(coefficients[slot - range.start()], coefficient);
-                }
+            if (BusyRules.isHard(person.role(), busy.kind(), scope)) {
+                boolean classes = busy.kind() == Person.Busy.Kind.TIMETABLE;
+                violation(classes ? Reason.PERSON_HAS_CLASSES : Reason.PERSON_CRITICALLY_BUSY,
+                        classes ? "Событие попадает на пары участников" : "Событие попадает на критическую занятость участников",
+                        List.of(placement.event().id()), List.of(person.id()), List.of());
+                continue;
+            }
+            int coefficient = BusyRules.softCoefficient(person.role(), busy.kind(), scope);
+            for (int slot = Math.max(busy.range().start(), range.start()); slot < Math.min(busy.range().end(), range.end()); slot++) {
+                coefficients[slot - range.start()] = Math.max(coefficients[slot - range.start()], coefficient);
             }
         }
         int weightedSlots = Arrays.stream(coefficients).sum();
@@ -283,12 +265,17 @@ public final class ScheduleValidator {
             boolean ordered = before.range().end() <= after.range().start();
             boolean tooLate = dependency.maxGapDays().isPresent() && days > dependency.maxGapDays().getAsInt();
             if (!ordered || days < dependency.minGapDays() || tooLate) {
-                violation(HardConstraint.H7, "Событие " + dependency.before() + " должно быть раньше события "
-                        + dependency.after() + " на " + dependency.minGapDays()
-                        + dependency.maxGapDays().stream().mapToObj(max -> "–" + max).findFirst().orElse("+") + " дн.",
-                        List.of(dependency.before(), dependency.after()), List.of(), List.of());
+                violation(Reason.DEPENDENCY_BROKEN, "Второе событие должно пройти " + gapText(dependency) + " после первого",
+                        List.of(dependency.before(), dependency.after()));
             }
         }
+    }
+
+    private static String gapText(Dependency dependency) {
+        if (dependency.maxGapDays().isPresent()) {
+            return "через " + dependency.minGapDays() + "–" + dependency.maxGapDays().getAsInt() + " дн.";
+        }
+        return dependency.minGapDays() == 0 ? "сразу или позже" : "не раньше чем через " + dependency.minGapDays() + " дн.";
     }
 
     private void checkPreparation() {
@@ -304,8 +291,7 @@ public final class ScheduleValidator {
                     Placement b = withPreparation.get(j);
                     int needed = Math.max(a.event().preparationDays(), b.event().preparationDays());
                     if (b.day() - a.day() < needed) {
-                        violation(HardConstraint.H10, "У студента " + personId + " между событиями " + a.event().id()
-                                + " и " + b.event().id() + " меньше " + needed + " дн. на подготовку",
+                        violation(Reason.PREPARATION_TOO_SHORT, "Между событиями меньше " + needed + " дн. на подготовку",
                                 List.of(a.event().id(), b.event().id()), List.of(personId), List.of());
                     }
                 }
@@ -341,7 +327,7 @@ public final class ScheduleValidator {
 
     /** S4: changes of room between consecutive onsite events of one day. */
     private long roomSwitches(List<Placement> day) {
-        List<Long> onsiteRooms = day.stream().map(Placement::roomId).filter(room -> room != null).toList();
+        List<Long> onsiteRooms = day.stream().map(Placement::physicalRoom).filter(room -> room != null).toList();
         long switches = 0;
         for (int i = 1; i < onsiteRooms.size(); i++) {
             if (!onsiteRooms.get(i).equals(onsiteRooms.get(i - 1))) {
@@ -363,13 +349,9 @@ public final class ScheduleValidator {
         return loads.values().stream().mapToLong(Long::longValue).toArray();
     }
 
-    /** S5: baseline events that are now unassigned or have another time, venue or commission. */
+    /** S5: baseline events that are now unassigned or have another time, room, commission or chair. */
     private long moves() {
-        return problem.baseline().stream().filter(base -> {
-            Assignment now = assigned.get(base.eventId());
-            return now == null || now.start() != base.start() || !now.venue().equals(base.venue())
-                    || !now.commission().equals(base.commission());
-        }).count();
+        return problem.baseline().stream().filter(base -> !base.equals(assigned.get(base.eventId()))).count();
     }
 
     private static void forOverlaps(List<Placement> placements, OverlapHandler handler) {
@@ -399,17 +381,15 @@ public final class ScheduleValidator {
         return Math.sqrt(Arrays.stream(values).mapToDouble(v -> (v - mean) * (v - mean)).sum() / values.length);
     }
 
-    private static long max(long[] values) {
-        return Arrays.stream(values).max().orElse(0);
+    private void violation(Reason reason, String message, List<Long> eventIds) {
+        violation(reason, message, eventIds, List.of(), List.of());
     }
 
-    private static long min(long[] values) {
-        return Arrays.stream(values).min().orElse(0);
-    }
-
-    private void violation(HardConstraint constraint, String message, List<Long> eventIds, List<Long> personIds,
-                           List<Long> roomIds) {
-        violations.add(new Violation(constraint, message, eventIds, personIds, roomIds));
+    private void violation(Reason reason, String message, List<Long> eventIds, List<Long> personIds, List<Long> roomIds) {
+        Violation violation = new Violation(reason, message, eventIds, personIds, roomIds);
+        violations.merge(List.of(reason, violation.eventIds(), violation.roomIds(), message), violation,
+                (merged, next) -> new Violation(reason, message, merged.eventIds(),
+                        Stream.concat(merged.personIds().stream(), next.personIds().stream()).toList(), merged.roomIds()));
     }
 
     private static <T> Map<Long, T> index(List<T> items, Function<T, Long> id) {

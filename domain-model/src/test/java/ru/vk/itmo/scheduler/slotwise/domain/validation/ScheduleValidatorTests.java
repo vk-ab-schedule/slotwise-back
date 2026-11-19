@@ -11,7 +11,6 @@ import ru.vk.itmo.scheduler.slotwise.domain.Room;
 import ru.vk.itmo.scheduler.slotwise.domain.Score;
 import ru.vk.itmo.scheduler.slotwise.domain.SlotRange;
 import ru.vk.itmo.scheduler.slotwise.domain.TimeGrid;
-import ru.vk.itmo.scheduler.slotwise.domain.Venue;
 import ru.vk.itmo.scheduler.slotwise.domain.Weights;
 
 import java.time.Instant;
@@ -42,9 +41,9 @@ class ScheduleValidatorTests {
             List.of(S1, S2, T1), Event.CommissionRequirement.NONE, List.of(), List.of(), 0);
 
     // A valid schedule: consultation on day 0 online, exam and defense on day 1.
-    private static final Assignment CONSULTATION_OK = new Assignment(CONSULTATION, slot(0, 10, 0), new Venue.Online(ONLINE), List.of());
-    private static final Assignment EXAM_OK = new Assignment(EXAM, slot(1, 10, 0), Venue.room(R2), List.of());
-    private static final Assignment DEFENSE_OK = new Assignment(DEFENSE, slot(1, 12, 0), Venue.room(R1), List.of(T2, T3), OptionalLong.of(T2));
+    private static final Assignment CONSULTATION_OK = new Assignment(CONSULTATION, slot(0, 10, 0), ONLINE, List.of());
+    private static final Assignment EXAM_OK = new Assignment(EXAM, slot(1, 10, 0), R2, List.of());
+    private static final Assignment DEFENSE_OK = new Assignment(DEFENSE, slot(1, 12, 0), R1, List.of(T2, T3), OptionalLong.of(T2));
 
     @Test
     void validScheduleHasNoViolationsAndExpectedMetrics() {
@@ -67,18 +66,56 @@ class ScheduleValidatorTests {
     @Test
     void h1UnknownOrRepeatedEvent() {
         assertViolations(validate(problem().build(), CONSULTATION_OK, EXAM_OK, DEFENSE_OK,
-                new Assignment(999, slot(1, 15, 0), Venue.room(R2), List.of()),
-                new Assignment(EXAM, slot(1, 15, 0), Venue.room(R2), List.of())), HardConstraint.H1, HardConstraint.H1);
+                new Assignment(999, slot(1, 15, 0), R2, List.of()),
+                new Assignment(EXAM, slot(1, 15, 0), R2, List.of())), HardConstraint.H1, HardConstraint.H1);
     }
 
     @Test
     void h2PersonInTwoEventsOrWithoutTimeToChangeRooms() {
-        Assignment overlapping = new Assignment(DEFENSE, slot(1, 10, 15), Venue.room(R1), List.of(T2, T3), OptionalLong.of(T2));
-        Assignment rightAfter = new Assignment(DEFENSE, slot(1, 10, 30), Venue.room(R1), List.of(T2, T3), OptionalLong.of(T2));
+        Assignment overlapping = new Assignment(DEFENSE, slot(1, 10, 15), R1, List.of(T2, T3), OptionalLong.of(T2));
+        Assignment rightAfter = new Assignment(DEFENSE, slot(1, 10, 30), R1, List.of(T2, T3), OptionalLong.of(T2));
 
-        // S1 and T1 are in both events.
-        assertViolations(validate(problem().build(), CONSULTATION_OK, EXAM_OK, overlapping), HardConstraint.H2, HardConstraint.H2);
-        assertViolations(validate(problem().build(), CONSULTATION_OK, EXAM_OK, rightAfter), HardConstraint.H2, HardConstraint.H2);
+        // S1 and T1 are in both events: one violation for both of them.
+        Validation clash = validate(problem().build(), CONSULTATION_OK, EXAM_OK, overlapping);
+        assertViolations(clash, HardConstraint.H2);
+        assertThat(clash.violations().getFirst().reason()).isEqualTo(Violation.Reason.PERSON_DOUBLE_BOOKED);
+        assertThat(clash.violations().getFirst().personIds()).containsExactly(T1, S1);
+        assertThat(clash.violations().getFirst().eventIds()).containsExactly(EXAM, DEFENSE);
+
+        Validation noBuffer = validate(problem().build(), CONSULTATION_OK, EXAM_OK, rightAfter);
+        assertViolations(noBuffer, HardConstraint.H2);
+        assertThat(noBuffer.violations().getFirst().reason()).isEqualTo(Violation.Reason.NO_TIME_TO_CHANGE_ROOM);
+        assertThat(noBuffer.violations().getFirst().roomIds()).containsExactly(R1, R2);
+    }
+
+    @Test
+    void groupClassesGiveOneViolationWithAllStudents() {
+        SlotRange examTime = new SlotRange(slot(1, 10, 0), slot(1, 10, 30));
+        Problem base = problem().build();
+        List<Person> people = base.people().stream().map(p -> p.role() == Person.Role.STUDENT
+                ? new Person(p.id(), p.role(), List.of(new Person.Busy(examTime, Person.Busy.Kind.TIMETABLE),
+                new Person.Busy(new SlotRange(slot(1, 9, 0), slot(1, 10, 15)), Person.Busy.Kind.TIMETABLE))) : p).toList();
+
+        Validation validation = validate(base.toBuilder().clearPeople().people(people).build(), CONSULTATION_OK, EXAM_OK, DEFENSE_OK);
+
+        // The defense at 12:00 is free; the exam clashes with two classes of each student.
+        assertThat(validation.violations()).singleElement().satisfies(violation -> {
+            assertThat(violation.reason()).isEqualTo(Violation.Reason.PERSON_HAS_CLASSES);
+            assertThat(violation.eventIds()).containsExactly(EXAM);
+            assertThat(violation.personIds()).containsExactly(S1, S2);
+        });
+    }
+
+    @Test
+    void messagesNameNoIds() {
+        Validation validation = validate(problem().build(), CONSULTATION_OK, DEFENSE_OK,
+                new Assignment(EXAM, slot(1, 10, 0), SMALL, List.of()));
+
+        assertThat(validation.violations()).singleElement().satisfies(violation -> {
+            assertThat(violation.reason()).isEqualTo(Violation.Reason.ROOM_TOO_SMALL);
+            assertThat(violation.message()).isEqualTo("В аудитории 2 мест, а участников вместе с комиссией 3");
+            assertThat(violation.roomIds()).containsExactly(SMALL);
+        });
     }
 
     @Test
@@ -90,7 +127,7 @@ class ScheduleValidatorTests {
         Problem withTeacher = problem().event(new Event(104, 6, Event.Scope.GROUP, Event.Format.ONSITE, List.of(T4),
                 Event.CommissionRequirement.NONE, List.of(), List.of(), 0)).build();
         assertViolations(validate(withTeacher, CONSULTATION_OK, EXAM_OK, DEFENSE_OK,
-                new Assignment(104, slot(1, 10, 0), Venue.room(R2), List.of())), HardConstraint.H3);
+                new Assignment(104, slot(1, 10, 0), R2, List.of())), HardConstraint.H3);
     }
 
     @Test
@@ -135,13 +172,13 @@ class ScheduleValidatorTests {
     @Test
     void h5VenueMustFitFormatCapacityAndEquipment() {
         assertViolations(validate(problem().build(), CONSULTATION_OK, EXAM_OK,
-                new Assignment(DEFENSE, slot(1, 12, 0), Venue.room(R2), List.of(T2, T3), OptionalLong.of(T2))), HardConstraint.H5);
+                new Assignment(DEFENSE, slot(1, 12, 0), R2, List.of(T2, T3), OptionalLong.of(T2))), HardConstraint.H5);
         assertViolations(validate(problem().build(), CONSULTATION_OK, DEFENSE_OK,
-                new Assignment(EXAM, slot(1, 10, 0), Venue.room(SMALL), List.of())), HardConstraint.H5);
+                new Assignment(EXAM, slot(1, 10, 0), SMALL, List.of())), HardConstraint.H5);
         assertViolations(validate(problem().build(), EXAM_OK, DEFENSE_OK,
-                new Assignment(CONSULTATION, slot(0, 10, 0), Venue.room(R2), List.of())), HardConstraint.H5);
+                new Assignment(CONSULTATION, slot(0, 10, 0), R2, List.of())), HardConstraint.H5);
         assertViolations(validate(problem().build(), CONSULTATION_OK, DEFENSE_OK,
-                new Assignment(EXAM, slot(1, 10, 0), new Venue.Online(ONLINE), List.of())), HardConstraint.H5);
+                new Assignment(EXAM, slot(1, 10, 0), ONLINE, List.of())), HardConstraint.H5);
     }
 
     @Test
@@ -160,17 +197,17 @@ class ScheduleValidatorTests {
     void h6NamedChairMustBeAbleToChairEvenIfNotRequired() {
         Problem withOptionalChair = problem().event(new Event(104, 6, Event.Scope.INDIVIDUAL, Event.Format.ONSITE,
                 List.of(S2, T1), new Event.CommissionRequirement(2, false), List.of(), List.of(), 0)).build();
-        Assignment base = new Assignment(104, slot(1, 15, 0), Venue.room(R2), List.of(T2, T3));
+        Assignment base = new Assignment(104, slot(1, 15, 0), R2, List.of(T2, T3));
 
         assertThat(validate(withOptionalChair, CONSULTATION_OK, EXAM_OK, DEFENSE_OK, base).violations()).isEmpty();
         assertViolations(validate(withOptionalChair, CONSULTATION_OK, EXAM_OK, DEFENSE_OK,
-                new Assignment(104, base.start(), base.venue(), base.commission(), OptionalLong.of(T3))), HardConstraint.H6);
+                new Assignment(104, base.start(), base.roomId(), base.commission(), OptionalLong.of(T3))), HardConstraint.H6);
     }
 
     @Test
     void h7DependencyKeepsOrderAndGap() {
-        Assignment sameDay = new Assignment(CONSULTATION, slot(1, 9, 0), new Venue.Online(ONLINE), List.of());
-        Assignment tooEarly = new Assignment(EXAM, slot(3, 10, 0), Venue.room(R2), List.of());
+        Assignment sameDay = new Assignment(CONSULTATION, slot(1, 9, 0), ONLINE, List.of());
+        Assignment tooEarly = new Assignment(EXAM, slot(3, 10, 0), R2, List.of());
 
         assertViolations(validate(problem().build(), sameDay, EXAM_OK, DEFENSE_OK), HardConstraint.H7);
         assertViolations(validate(problem().build(), CONSULTATION_OK, tooEarly, DEFENSE_OK), HardConstraint.H7);
@@ -179,9 +216,9 @@ class ScheduleValidatorTests {
     @Test
     void h8EventStaysWithinWorkingHours() {
         assertViolations(validate(problem().build(), CONSULTATION_OK, DEFENSE_OK,
-                new Assignment(EXAM, slot(1, 18, 45), Venue.room(R2), List.of())), HardConstraint.H8);
+                new Assignment(EXAM, slot(1, 18, 45), R2, List.of())), HardConstraint.H8);
         assertViolations(validate(problem().build(), CONSULTATION_OK, DEFENSE_OK,
-                new Assignment(EXAM, 4 * DAY - 2, Venue.room(R2), List.of())), HardConstraint.H8);
+                new Assignment(EXAM, 4 * DAY - 2, R2, List.of())), HardConstraint.H8);
     }
 
     @Test
@@ -196,25 +233,28 @@ class ScheduleValidatorTests {
     void h10StudentNeedsPreparationDaysBetweenExams() {
         Problem twoExams = problem().event(new Event(104, 6, Event.Scope.GROUP, Event.Format.ONSITE, List.of(S1, S2, T4),
                 Event.CommissionRequirement.NONE, List.of(), List.of(), 2)).build();
-        Assignment nextDay = new Assignment(104, slot(2, 10, 0), Venue.room(R2), List.of());
-        Assignment twoDaysLater = new Assignment(104, slot(3, 10, 0), Venue.room(R2), List.of());
+        Assignment nextDay = new Assignment(104, slot(2, 10, 0), R2, List.of());
+        Assignment twoDaysLater = new Assignment(104, slot(3, 10, 0), R2, List.of());
 
-        // Two students, one violation each.
-        assertViolations(validate(twoExams, CONSULTATION_OK, EXAM_OK, DEFENSE_OK, nextDay), HardConstraint.H10, HardConstraint.H10);
+        Validation tooClose = validate(twoExams, CONSULTATION_OK, EXAM_OK, DEFENSE_OK, nextDay);
+        assertViolations(tooClose, HardConstraint.H10);
+        assertThat(tooClose.violations().getFirst().personIds()).containsExactly(S1, S2);
         assertThat(validate(twoExams, CONSULTATION_OK, EXAM_OK, DEFENSE_OK, twoDaysLater).violations()).isEmpty();
     }
 
     @Test
     void s5CountsChangesAgainstBaseline() {
         Problem rescheduling = problem().baselineAssignment(DEFENSE_OK).baselineAssignment(EXAM_OK).build();
-        Assignment moved = new Assignment(DEFENSE, slot(1, 14, 0), Venue.room(R1), List.of(T2, T3), OptionalLong.of(T2));
+        Assignment moved = new Assignment(DEFENSE, slot(1, 14, 0), R1, List.of(T2, T3), OptionalLong.of(T2));
 
         assertThat(validate(rescheduling, CONSULTATION_OK, EXAM_OK, moved).rawPenalties()).containsEntry(SoftConstraint.S5, 1L);
         assertThat(validate(rescheduling, CONSULTATION_OK, moved).rawPenalties()).containsEntry(SoftConstraint.S5, 2L);
+        Assignment otherChair = new Assignment(DEFENSE, DEFENSE_OK.start(), R1, List.of(T2, T3), OptionalLong.of(T3));
+        assertThat(validate(rescheduling, CONSULTATION_OK, EXAM_OK, otherChair).rawPenalties()).containsEntry(SoftConstraint.S5, 1L);
     }
 
     private static Assignment defenseWith(List<Long> commission, OptionalLong chair) {
-        return new Assignment(DEFENSE, slot(1, 12, 0), Venue.room(R1), commission, chair);
+        return new Assignment(DEFENSE, slot(1, 12, 0), R1, commission, chair);
     }
 
     private static Problem withBusy(long personId, SlotRange range, Person.Busy.Kind kind) {

@@ -3,7 +3,8 @@ package ru.vk.itmo.scheduler.slotwise.domain;
 import java.util.List;
 
 /**
- * Physical room or online platform. An online platform has no capacity limit or room busy time.
+ * Physical room or online platform. An online platform has no capacity limit or room busy time;
+ * online events go there, onsite and hybrid events go to physical rooms (H5).
  *
  * @param equipment ids of the equipment in the room
  * @param busy      classes from the university timetable (H3)

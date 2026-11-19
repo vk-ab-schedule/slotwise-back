@@ -42,7 +42,7 @@ class ProblemTests {
 
     @Test
     void pinnedAssignmentsAreFoundByEvent() {
-        Assignment pin = new Assignment(100, 120, Venue.room(10), List.of());
+        Assignment pin = new Assignment(100, 120, 10, List.of());
 
         Problem problem = base().event(defense(100)).pin(pin).build();
 
@@ -84,34 +84,30 @@ class ProblemTests {
     @Test
     void rejectsPinnedAssignmentInUnknownRoom() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> base().event(defense(100)).pin(new Assignment(100, 120, Venue.room(11), List.of())).build())
+                .isThrownBy(() -> base().event(defense(100)).pin(new Assignment(100, 120, 11, List.of())).build())
                 .withMessageContaining("Unknown room 11");
     }
 
     @Test
     void onlineAssignmentKeepsItsPlatformId() {
-        Assignment pin = new Assignment(100, 120, new Venue.Online(12), List.of());
+        Assignment pin = new Assignment(100, 120, 12, List.of());
         Problem problem = base().event(defense(100))
                 .room(new Room(11, null, List.of(), List.of(), true))
                 .room(new Room(12, null, List.of(), List.of(), true))
                 .pin(pin).build();
 
-        assertThat(problem.pinned(100).orElseThrow().venue().roomId()).isEqualTo(12);
+        assertThat(problem.pinned(100).orElseThrow().roomId()).isEqualTo(12);
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> base().event(defense(100)).pin(pin).build())
                 .withMessageContaining("Unknown room 12");
-        assertThatIllegalArgumentException()
-                .isThrownBy(() -> base().event(defense(100))
-                        .pin(new Assignment(100, 120, new Venue.Online(10), List.of())).build())
-                .withMessageContaining("Venue type does not match room 10");
     }
 
     @Test
     void chairMustBeAMemberOfTheCommissionWithChairPermission() {
         Person chair = new Person(3, Person.Role.TEACHER, List.of());
-        Assignment pin = new Assignment(100, 120, Venue.room(10), List.of(3L), OptionalLong.of(3));
+        Assignment pin = new Assignment(100, 120, 10, List.of(3L), OptionalLong.of(3));
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new Assignment(100, 120, Venue.room(10), List.of(1L), OptionalLong.of(3)))
+                .isThrownBy(() -> new Assignment(100, 120, 10, List.of(1L), OptionalLong.of(3)))
                 .withMessageContaining("is not in the commission");
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> base().event(defense(100)).person(chair)
@@ -125,7 +121,7 @@ class ProblemTests {
     @Test
     void rejectsAssignmentEndingAfterTheGrid() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> base().event(defense(100)).pin(new Assignment(100, 285, new Venue.Online(11), List.of())).build())
+                .isThrownBy(() -> base().event(defense(100)).pin(new Assignment(100, 285, 11, List.of())).build())
                 .withMessageContaining("outside the grid");
     }
 
@@ -144,7 +140,7 @@ class ProblemTests {
         assertThatIllegalArgumentException().isThrownBy(() -> new Event.CommissionRequirement(0, true));
         assertThatIllegalArgumentException().isThrownBy(() -> Dependency.between(1, 2, 3, 2));
         assertThatIllegalArgumentException().isThrownBy(() -> new SlotRange(5, 5));
-        assertThatIllegalArgumentException().isThrownBy(() -> new Assignment(1, 0, new Venue.Online(11), List.of(3L, 3L)));
+        assertThatIllegalArgumentException().isThrownBy(() -> new Assignment(1, 0, 11, List.of(3L, 3L)));
     }
 
     private static Problem.ProblemBuilder base() {
