@@ -2,16 +2,18 @@ package ru.vk.itmo.scheduler.slotwise.domain;
 
 /**
  * Weights of the soft constraints (MODEL.md, «Мягкие ограничения»). The penalty is
- * {@code P = gaps·Gaps + unfairness·Unfair + undesirable·Pref + roomSwitches·Switches + moves·Moves}.
+ * {@code P = teacherGaps·S1 + commissionLoadSpread·S2 + undesirableTime·S3 + teacherRoomChanges·S4 + movedEvents·S5}.
+ * The names are the same as in the API.
  *
- * <p>Gaps, Unfair and Pref are in minutes, Switches and Moves are counts, so the default weights
+ * <p>S1, S2 and S3 are in minutes, S4 and S5 are counts, so the default weights
  * value one room switch as 15 minutes of gaps and one moved event as 30 minutes.
  */
-public record Weights(int gaps, int unfairness, int undesirable, int roomSwitches, int moves) {
+public record Weights(int teacherGaps, int commissionLoadSpread, int undesirableTime, int teacherRoomChanges,
+                      int movedEvents) {
     public static final Weights DEFAULT = new Weights(1, 1, 1, 15, 30);
 
     public Weights {
-        if (gaps < 0 || unfairness < 0 || undesirable < 0 || roomSwitches < 0 || moves < 0) {
+        if (teacherGaps < 0 || commissionLoadSpread < 0 || undesirableTime < 0 || teacherRoomChanges < 0 || movedEvents < 0) {
             throw new IllegalArgumentException("Weights must not be negative: " + this);
         }
     }

@@ -131,10 +131,7 @@ public final class Problem {
         for (Assignment assignment : sorted) {
             Event event = event(assignment.eventId());
             requireInGrid(SlotRange.ofLength(assignment.start(), event.duration()), what + " of event " + event.id());
-            Room room = room(assignment.venue().roomId());
-            if (room.online() != (assignment.venue() instanceof Venue.Online)) {
-                throw new IllegalArgumentException("Venue type does not match room " + room.id());
-            }
+            room(assignment.roomId());
             assignment.commission().forEach(this::person);
             if (assignment.chair().isPresent()) {
                 long chairId = assignment.chair().getAsLong();

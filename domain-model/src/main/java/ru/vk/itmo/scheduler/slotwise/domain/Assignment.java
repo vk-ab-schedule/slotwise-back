@@ -6,14 +6,13 @@ import java.util.List;
 import java.util.OptionalLong;
 
 /**
- * Placement of one event: start slot, venue, commission members and optional chair.
- * Events that are not placed have no assignment.
+ * Placement of one event: start slot, room (a physical room or an online platform, see {@link Room#online()}),
+ * commission members and optional chair. Events that are not placed have no assignment.
  */
-public record Assignment(long eventId, int start, @NonNull Venue venue, List<Long> commission,
-                         @NonNull OptionalLong chair) {
+public record Assignment(long eventId, int start, long roomId, List<Long> commission, @NonNull OptionalLong chair) {
 
-    public Assignment(long eventId, int start, Venue venue, List<Long> commission) {
-        this(eventId, start, venue, commission, OptionalLong.empty());
+    public Assignment(long eventId, int start, long roomId, List<Long> commission) {
+        this(eventId, start, roomId, commission, OptionalLong.empty());
     }
 
     public Assignment {
