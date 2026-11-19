@@ -9,6 +9,7 @@ import ru.vk.itmo.scheduler.slotwise.domain.Person;
 import ru.vk.itmo.scheduler.slotwise.domain.Problem;
 import ru.vk.itmo.scheduler.slotwise.domain.Room;
 
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.HashSet;
@@ -140,6 +141,22 @@ class DatasetGeneratorTests {
                 LocalTime.of(13, 30), LocalTime.of(15, 20), LocalTime.of(17, 0), LocalTime.of(18, 40));
         assertThat(data.timetable()).isNotEmpty().allMatch(t ->
                 classStarts.contains(t.start().atZone(ZoneId.of("Europe/Moscow")).toLocalTime()));
+    }
+
+    @Test
+    void demoSuggestsTheSessionTheTimetableCovers() {
+        UniversityData data = DatasetGenerator.university(DatasetProfile.M, 11);
+        UniversityData.SessionHint session = data.session();
+
+        // M has 5 working days: Monday to Friday.
+        assertThat(session.firstDay()).isEqualTo(LocalDate.of(2027, 6, 14));
+        assertThat(session.lastDay()).isEqualTo(LocalDate.of(2027, 6, 18));
+        assertThat(session.dayStart()).isEqualTo(LocalTime.of(9, 0));
+        assertThat(session.dayEnd()).isEqualTo(LocalTime.of(19, 0));
+        assertThat(data.timetable()).allMatch(t -> {
+            LocalDate day = t.start().atZone(session.timeZone()).toLocalDate();
+            return !day.isBefore(session.firstDay()) && !day.isAfter(session.lastDay());
+        });
     }
 
     private static long busyMinutes(Problem problem) {

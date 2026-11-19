@@ -1,13 +1,20 @@
 package ru.vk.itmo.scheduler.slotwise.datagen;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
  * University data in the shape of the JSON import (UX-04): records reference each other by external id.
  * The application maps it to its import request; datagen does not depend on the application.
+ *
+ * @param session the session period the timetable covers: the demo shows it to the organizer, otherwise
+ *                a session on other dates would show no classes at all
  */
 public record UniversityData(
+        SessionHint session,
         List<Account> accounts,
         List<Group> groups,
         List<Room> rooms,
@@ -15,6 +22,9 @@ public record UniversityData(
         List<Teaching> teaching,
         List<Supervision> supervision,
         List<TimetableEntry> timetable) {
+
+    public record SessionHint(LocalDate firstDay, LocalDate lastDay, ZoneId timeZone, LocalTime dayStart, LocalTime dayEnd) {
+    }
 
     public enum Role {
         ADMIN,

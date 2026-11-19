@@ -242,7 +242,9 @@ public final class DatasetGenerator {
                 accountId(id), null, grid.toInstant(range.start()), grid.toInstant(range.end())))));
         rooms.forEach(room -> room.busy().forEach(range -> timetable.add(new UniversityData.TimetableEntry(
                 null, roomId(room.id()), grid.toInstant(range.start()), grid.toInstant(range.end())))));
-        return new UniversityData(accounts, groupData, roomData, disciplines, teaching, supervision, timetable);
+        UniversityData.SessionHint session = new UniversityData.SessionHint(days.getFirst(), days.getLast(), ZONE,
+                DAY_START, DAY_START.plus(WORKING_DAY));
+        return new UniversityData(session, accounts, groupData, roomData, disciplines, teaching, supervision, timetable);
     }
 
     private UniversityData.Account account(long id) {
