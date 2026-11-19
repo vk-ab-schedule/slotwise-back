@@ -180,12 +180,13 @@ public final class ScheduleValidator {
             violation(HardConstraint.H6, "В комиссию события " + event.id() + " нельзя включать " + wrong,
                     eventIds, wrong, List.of());
         }
-        if (requirement.chairRequired()) {
-            OptionalLong chair = assignment.chair();
-            if (chair.isEmpty() || !pool.containsKey(chair.getAsLong()) || !pool.get(chair.getAsLong()).canChair()) {
-                violation(HardConstraint.H6, "У комиссии события " + event.id() + " нет председателя с правом председательствовать",
-                        eventIds, chair.stream().boxed().toList(), List.of());
-            }
+        // A named chair must be able to chair; chairRequired only decides whether the chair may be absent.
+        OptionalLong chair = assignment.chair();
+        if (chair.isPresent() && !(pool.containsKey(chair.getAsLong()) && pool.get(chair.getAsLong()).canChair())) {
+            violation(HardConstraint.H6, "Участник " + chair.getAsLong() + " не может председательствовать в комиссии события "
+                    + event.id(), eventIds, List.of(chair.getAsLong()), List.of());
+        } else if (chair.isEmpty() && requirement.chairRequired()) {
+            violation(HardConstraint.H6, "У комиссии события " + event.id() + " нет председателя", eventIds, List.of(), List.of());
         }
     }
 
@@ -239,8 +240,11 @@ public final class ScheduleValidator {
     }
 
     private void checkBusy(Person person, Placement placement) {
+        SlotRange range = placement.range();
+        // Overlapping soft busy time counts once with the highest coefficient, as in the busy calendar (UX-09).
+        int[] coefficients = new int[range.length()];
         for (Person.Busy busy : person.busy()) {
-            if (!busy.range().overlaps(placement.range())) {
+            if (!busy.range().overlaps(range)) {
                 continue;
             }
             boolean studentInGroupEvent = person.role() == Person.Role.STUDENT && placement.event().scope() == Event.Scope.GROUP;
@@ -255,9 +259,15 @@ public final class ScheduleValidator {
                         + (busy.kind() == Person.Busy.Kind.TIMETABLE ? "пару" : "критическую занятость")
                         + " участника " + person.id(), List.of(placement.event().id()), List.of(person.id()), List.of());
             } else {
-                undesirableEvents.add(placement.event().id());
-                undesirableMinutes += (long) coefficient * grid.toMinutes(overlap(busy.range(), placement.range()));
+                for (int slot = Math.max(busy.range().start(), range.start()); slot < Math.min(busy.range().end(), range.end()); slot++) {
+                    coefficients[slot - range.start()] = Math.max(coefficients[slot - range.start()], coefficient);
+                }
             }
+        }
+        int weightedSlots = Arrays.stream(coefficients).sum();
+        if (weightedSlots > 0) {
+            undesirableEvents.add(placement.event().id());
+            undesirableMinutes += grid.toMinutes(weightedSlots);
         }
     }
 
@@ -379,10 +389,6 @@ public final class ScheduleValidator {
     private static List<Placement> sortedByStart(List<Placement> placements) {
         return placements.stream().sorted(Comparator.comparing(Placement::range)
                 .thenComparingLong(p -> p.event().id())).toList();
-    }
-
-    private static int overlap(SlotRange a, SlotRange b) {
-        return Math.min(a.end(), b.end()) - Math.max(a.start(), b.start());
     }
 
     private static double standardDeviation(long[] values) {

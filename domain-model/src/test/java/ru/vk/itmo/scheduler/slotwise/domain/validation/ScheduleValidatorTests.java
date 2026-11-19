@@ -122,6 +122,17 @@ class ScheduleValidatorTests {
     }
 
     @Test
+    void s3CountsOverlappingBusyTimeOnceWithTheHighestCoefficient() {
+        SlotRange examTime = new SlotRange(slot(1, 10, 0), slot(1, 10, 30));
+        Problem base = problem().build();
+        List<Person> people = base.people().stream().map(p -> p.id() == T1 ? new Person(T1, p.role(), List.of(
+                new Person.Busy(examTime, Person.Busy.Kind.MEDIUM), new Person.Busy(examTime, Person.Busy.Kind.LOW))) : p).toList();
+
+        assertThat(validate(base.toBuilder().clearPeople().people(people).build(), CONSULTATION_OK, EXAM_OK, DEFENSE_OK)
+                .rawPenalties()).containsEntry(SoftConstraint.S3, 3L * 30);
+    }
+
+    @Test
     void h5VenueMustFitFormatCapacityAndEquipment() {
         assertViolations(validate(problem().build(), CONSULTATION_OK, EXAM_OK,
                 new Assignment(DEFENSE, slot(1, 12, 0), Venue.room(R2), List.of(T2, T3), OptionalLong.of(T2))), HardConstraint.H5);
@@ -143,6 +154,17 @@ class ScheduleValidatorTests {
                 HardConstraint.H6);
         assertViolations(validate(problem().build(), CONSULTATION_OK, EXAM_OK, defenseWith(List.of(T2, T3), OptionalLong.empty())),
                 HardConstraint.H6);
+    }
+
+    @Test
+    void h6NamedChairMustBeAbleToChairEvenIfNotRequired() {
+        Problem withOptionalChair = problem().event(new Event(104, 6, Event.Scope.INDIVIDUAL, Event.Format.ONSITE,
+                List.of(S2, T1), new Event.CommissionRequirement(2, false), List.of(), List.of(), 0)).build();
+        Assignment base = new Assignment(104, slot(1, 15, 0), Venue.room(R2), List.of(T2, T3));
+
+        assertThat(validate(withOptionalChair, CONSULTATION_OK, EXAM_OK, DEFENSE_OK, base).violations()).isEmpty();
+        assertViolations(validate(withOptionalChair, CONSULTATION_OK, EXAM_OK, DEFENSE_OK,
+                new Assignment(104, base.start(), base.venue(), base.commission(), OptionalLong.of(T3))), HardConstraint.H6);
     }
 
     @Test
