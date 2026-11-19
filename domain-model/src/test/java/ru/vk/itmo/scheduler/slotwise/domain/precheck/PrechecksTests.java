@@ -105,6 +105,17 @@ class PrechecksTests {
                 tuple(PrecheckIssue.Code.PREPARATION_DOES_NOT_FIT, List.of(S2)));
     }
 
+    @Test
+    void sessionWithoutWorkingTimeIsReportedNotThrown() {
+        TimeGrid noWorkingTime = new TimeGrid(GRID.origin(), GRID.zone(), 5, 2 * DAY, List.of());
+
+        assertThat(Prechecks.run(problem().grid(noWorkingTime).build()))
+                .filteredOn(issue -> issue.code() == PrecheckIssue.Code.NO_COMMON_WINDOW)
+                .flatExtracting(PrecheckIssue::eventIds).containsExactlyInAnyOrder(EXAM, DEFENSE);
+        assertThat(Prechecks.run(problem().grid(noWorkingTime).clearEvents().build()))
+                .extracting(PrecheckIssue::code).containsOnly(PrecheckIssue.Code.NO_FREE_TIME);
+    }
+
     private static Person person(long id, Person.Role role, Person.Busy.Kind kind, SlotRange... busy) {
         return new Person(id, role, Arrays.stream(busy).map(range -> new Person.Busy(range, kind)).toList());
     }

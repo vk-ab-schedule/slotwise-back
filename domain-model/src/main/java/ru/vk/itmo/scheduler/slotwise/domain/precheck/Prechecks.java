@@ -119,6 +119,10 @@ public final class Prechecks {
      * so n of them need at least (n - 1) · min days between the first and the last working day.
      */
     private void checkPreparation() {
+        // Without working time every event already has no common window.
+        if (grid.workingPeriods().isEmpty()) {
+            return;
+        }
         int firstDay = grid.dayOf(grid.workingPeriods().getFirst().start());
         int lastDay = grid.dayOf(grid.workingPeriods().getLast().start());
         Map<Long, List<Event>> byStudent = new TreeMap<>();
