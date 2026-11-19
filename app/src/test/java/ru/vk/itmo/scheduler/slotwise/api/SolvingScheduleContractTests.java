@@ -153,6 +153,16 @@ class SolvingScheduleContractTests extends ApiContractTestBase {
                 .param("to", "2027-02-01T00:00:00Z")).andExpect(status().isBadRequest());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"2027-01-01T00:00:00Z", "2026-12-31T23:59:59Z"})
+    void rejectsEmptyOrReversedPersonalScheduleRange(String to) throws Exception {
+        mvc.perform(get("/api/me/schedule")
+                        .param("from", "2027-01-01T00:00:00Z")
+                        .param("to", to))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SCHEDULE_RANGE"));
+    }
+
     @Test
     void documentsTypedResultsAndWholeVariantMutationSemantics() throws Exception {
         mvc.perform(get("/v3/api-docs"))
