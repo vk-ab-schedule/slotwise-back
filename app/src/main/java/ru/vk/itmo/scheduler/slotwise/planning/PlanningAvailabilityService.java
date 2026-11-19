@@ -234,8 +234,8 @@ public class PlanningAvailabilityService {
 
     private SessionRules.Response rulesResponse(PlanningSessionEntity session, SessionRuleEntity entity) {
         var defaults = Weights.DEFAULT;
-        Map<String, Integer> weights = new TreeMap<>(Map.of("S1", defaults.gaps(), "S2", defaults.unfairness(),
-                "S3", defaults.undesirable(), "S4", defaults.roomSwitches(), "S5", defaults.moves()));
+        Map<String, Integer> weights = new TreeMap<>(Map.of("S1", defaults.teacherGaps(), "S2", defaults.commissionLoadSpread(),
+                "S3", defaults.undesirableTime(), "S4", defaults.teacherRoomChanges(), "S5", defaults.movedEvents()));
         if (entity != null) {
             var stored = json.readTree(entity.getWeights());
             for (String key : WEIGHT_KEYS) {
