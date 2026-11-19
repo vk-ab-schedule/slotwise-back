@@ -18,6 +18,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.random.RandomGenerator;
@@ -255,7 +256,8 @@ public final class DatasetGenerator {
     }
 
     private String accountId(long id) {
-        return teachers.contains(id) ? "t%03d".formatted(id) : "s%04d".formatted(id);
+        // Locale.ROOT: with the default locale some JVMs print non-ASCII digits, and the import matches by these ids.
+        return String.format(Locale.ROOT, teachers.contains(id) ? "t%03d" : "s%04d", id);
     }
 
     private static String groupId(int group) {

@@ -13,6 +13,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -31,6 +32,20 @@ class DatasetGeneratorTests {
         assertThat(second.events()).isEqualTo(first.events());
         assertThat(second.dependencies()).isEqualTo(first.dependencies());
         assertThat(DatasetGenerator.university(DatasetProfile.M, 42)).isEqualTo(DatasetGenerator.university(DatasetProfile.M, 42));
+    }
+
+    @Test
+    void idsDoNotDependOnDefaultLocale() {
+        Locale saved = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.of("ar", "EG"));
+            UniversityData arabic = DatasetGenerator.university(DatasetProfile.S, 42);
+            Locale.setDefault(Locale.US);
+            assertThat(arabic).isEqualTo(DatasetGenerator.university(DatasetProfile.S, 42));
+            assertThat(arabic.accounts()).extracting(UniversityData.Account::externalId).contains("t001", "s0011");
+        } finally {
+            Locale.setDefault(saved);
+        }
     }
 
     @Test
