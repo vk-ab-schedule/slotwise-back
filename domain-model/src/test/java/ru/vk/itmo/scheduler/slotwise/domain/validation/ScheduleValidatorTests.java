@@ -222,6 +222,12 @@ class ScheduleValidatorTests {
     }
 
     @Test
+    void h8ReportsOutOfGridStartWithoutOverflow() {
+        Assignment outside = new Assignment(EXAM, Integer.MAX_VALUE, R2, List.of());
+        assertViolations(validate(problem().build(), CONSULTATION_OK, DEFENSE_OK, outside), HardConstraint.H8);
+    }
+
+    @Test
     void h9PinnedAssignmentsDoNotMove() {
         Problem pinned = problem().pin(CONSULTATION_OK).build();
 

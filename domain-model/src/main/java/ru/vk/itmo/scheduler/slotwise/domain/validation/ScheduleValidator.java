@@ -109,13 +109,13 @@ public final class ScheduleValidator {
             violation(Reason.DUPLICATE_ASSIGNMENT, "Событие назначено больше одного раза", List.of(event.id()));
             return;
         }
-        SlotRange range = SlotRange.ofLength(assignment.start(), event.duration());
-        boolean inGrid = range.end() <= grid.slotCount();
-        if (!inGrid || !grid.fitsWorkingPeriod(assignment.start(), event.duration())) {
+        if ((long) assignment.start() + event.duration() > grid.slotCount()) {
             violation(Reason.OUTSIDE_WORKING_HOURS, "Событие выходит за рабочее время сессии", List.of(event.id()));
-            if (!inGrid) {
-                return;
-            }
+            return;
+        }
+        SlotRange range = SlotRange.ofLength(assignment.start(), event.duration());
+        if (!grid.fitsWorkingPeriod(assignment.start(), event.duration())) {
+            violation(Reason.OUTSIDE_WORKING_HOURS, "Событие выходит за рабочее время сессии", List.of(event.id()));
         }
         Long physicalRoom = checkRoom(event, assignment);
         checkCommission(event, assignment);
