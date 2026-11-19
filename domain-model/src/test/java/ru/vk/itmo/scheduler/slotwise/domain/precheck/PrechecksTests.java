@@ -1,7 +1,9 @@
 package ru.vk.itmo.scheduler.slotwise.domain.precheck;
 
 import org.junit.jupiter.api.Test;
+import ru.vk.itmo.scheduler.slotwise.domain.Assignment;
 import ru.vk.itmo.scheduler.slotwise.domain.CommissionCandidate;
+import ru.vk.itmo.scheduler.slotwise.domain.Dependency;
 import ru.vk.itmo.scheduler.slotwise.domain.Event;
 import ru.vk.itmo.scheduler.slotwise.domain.Person;
 import ru.vk.itmo.scheduler.slotwise.domain.Problem;
@@ -14,6 +16,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
+import java.util.OptionalLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -100,9 +103,9 @@ class PrechecksTests {
         Problem problem = problem().event(new Event(103, 6, Event.Scope.GROUP, Event.Format.ONSITE, List.of(S1, S2, T2),
                 Event.CommissionRequirement.NONE, List.of(), List.of(), 2)).build();
 
-        assertThat(Prechecks.run(problem)).extracting(PrecheckIssue::code, PrecheckIssue::personIds).containsExactlyInAnyOrder(
-                tuple(PrecheckIssue.Code.PREPARATION_DOES_NOT_FIT, List.of(S1)),
-                tuple(PrecheckIssue.Code.PREPARATION_DOES_NOT_FIT, List.of(S2)));
+        // One issue for the whole group.
+        assertThat(Prechecks.run(problem)).extracting(PrecheckIssue::code, PrecheckIssue::personIds, PrecheckIssue::eventIds)
+                .containsExactly(tuple(PrecheckIssue.Code.PREPARATION_DOES_NOT_FIT, List.of(S1, S2), List.of(EXAM, 103L)));
     }
 
     @Test
@@ -110,10 +113,48 @@ class PrechecksTests {
         TimeGrid noWorkingTime = new TimeGrid(GRID.origin(), GRID.zone(), 5, 2 * DAY, List.of());
 
         assertThat(Prechecks.run(problem().grid(noWorkingTime).build()))
-                .filteredOn(issue -> issue.code() == PrecheckIssue.Code.NO_COMMON_WINDOW)
-                .flatExtracting(PrecheckIssue::eventIds).containsExactlyInAnyOrder(EXAM, DEFENSE);
+                .extracting(PrecheckIssue::code).containsExactly(PrecheckIssue.Code.NO_WORKING_TIME);
         assertThat(Prechecks.run(problem().grid(noWorkingTime).clearEvents().build()))
-                .extracting(PrecheckIssue::code).containsOnly(PrecheckIssue.Code.NO_FREE_TIME);
+                .extracting(PrecheckIssue::code).containsExactly(PrecheckIssue.Code.NO_WORKING_TIME);
+    }
+
+    @Test
+    void eventLongerThanWorkingDay() {
+        Problem problem = problem().event(new Event(103, 11 * 12, Event.Scope.GROUP, Event.Format.ONSITE, List.of(S1, T2),
+                Event.CommissionRequirement.NONE, List.of(), List.of(), 0)).build();
+
+        assertThat(Prechecks.run(problem)).extracting(PrecheckIssue::code, PrecheckIssue::eventIds)
+                .contains(tuple(PrecheckIssue.Code.EVENT_LONGER_THAN_WORKING_DAY, List.of(103L)))
+                .doesNotContain(tuple(PrecheckIssue.Code.NO_COMMON_WINDOW, List.of(103L)));
+    }
+
+    @Test
+    void dependencyLongerThanTheSession() {
+        Problem problem = problem().dependency(Dependency.atLeast(EXAM, DEFENSE, 3)).build();
+
+        assertThat(Prechecks.run(problem)).extracting(PrecheckIssue::code, PrecheckIssue::eventIds)
+                .containsExactly(tuple(PrecheckIssue.Code.DEPENDENCY_DOES_NOT_FIT, List.of(EXAM, DEFENSE)));
+    }
+
+    @Test
+    void conflictingPinnedAssignments() {
+        int tenOClock = 10 * 12;
+        Problem problem = problem()
+                .pin(new Assignment(EXAM, tenOClock, 1, List.of()))
+                .pin(new Assignment(DEFENSE, tenOClock, 1, List.of(T2, T3), OptionalLong.of(T2))).build();
+
+        assertThat(Prechecks.run(problem)).isNotEmpty().allMatch(issue -> issue.code() == PrecheckIssue.Code.PINNED_CONFLICT)
+                .anyMatch(issue -> issue.message().equals("Закреплённые назначения: В аудитории одновременно два события")
+                        && issue.eventIds().equals(List.of(EXAM, DEFENSE)));
+    }
+
+    @Test
+    void peopleWithoutFreeTimeGetOneWarning() {
+        Problem problem = problem(person(S1, Person.Role.STUDENT, Person.Busy.Kind.CRITICAL, DAY_0, DAY_1),
+                person(S2, Person.Role.STUDENT, Person.Busy.Kind.CRITICAL, DAY_0, DAY_1)).build();
+
+        assertThat(Prechecks.run(problem)).filteredOn(issue -> issue.code() == PrecheckIssue.Code.NO_FREE_TIME)
+                .singleElement().satisfies(issue -> assertThat(issue.personIds()).containsExactly(S1, S2));
     }
 
     private static Person person(long id, Person.Role role, Person.Busy.Kind kind, SlotRange... busy) {
