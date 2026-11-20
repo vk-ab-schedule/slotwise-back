@@ -54,12 +54,15 @@ SLOTWISE_ADMIN_EMAIL=admin@example.org SLOTWISE_ADMIN_PASSWORD=admin-password ./
 ```
 domain-model      чистая Java: входные данные солвера, назначения, SchedulingSolver, валидатор, метрики
 solver-greedy     жадный солвер                         → domain-model
+solver-cpsat      солвер CP-SAT                         → domain-model, OR-Tools
 datagen           генератор синтетических наборов (seed) → domain-model
 app               Spring Boot приложение                → всё перечисленное
 buildSrc          общие настройки сборки (плагины slotwise.*)
 ```
 
-Позже добавятся `solver-cpsat`, `solver-timefold` и `experiments`.
+Позже добавятся `solver-timefold` и `experiments`.
+
+Проверки CP-SAT запускаются командой `./gradlew :solver-cpsat:check` без PostgreSQL.
 
 **Правило:** `domain-model`, солверы и `datagen` не зависят от Spring. Проверка `verifyNoSpring` входит в `./gradlew build` и падает, если Spring попал в их зависимости, даже транзитивно.
 
