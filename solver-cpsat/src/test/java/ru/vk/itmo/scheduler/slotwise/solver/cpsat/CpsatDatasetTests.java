@@ -11,6 +11,7 @@ import ru.vk.itmo.scheduler.slotwise.domain.solver.SolveParams;
 import ru.vk.itmo.scheduler.slotwise.domain.solver.SolveResult;
 import ru.vk.itmo.scheduler.slotwise.domain.validation.ScheduleValidator;
 import ru.vk.itmo.scheduler.slotwise.domain.validation.Validation;
+import ru.vk.itmo.scheduler.slotwise.solver.greedy.GreedySolver;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,6 +42,23 @@ class CpsatDatasetTests {
         assertThat(second.score()).isEqualTo(first.score());
         assertThat(second.status()).isEqualTo(first.status());
         assertThat(second.penaltyBound()).isEqualTo(first.penaltyBound());
+    }
+
+    @Test
+    void warmStartedCpsatIsAtLeastAsGoodAsGreedyOnSmallDataset() {
+        Problem problem = DatasetGenerator.problem(DatasetProfile.S, SEED);
+        SolveParams params = new SolveParams(Duration.ofSeconds(5), SEED);
+        GreedySolver greedy = new GreedySolver();
+        SolveResult baseline = greedy.solve(problem, params, ProgressListener.NONE);
+        SolveResult improved = new CpsatSolver(greedy).solve(problem, params, ProgressListener.NONE);
+        Validation baselineValidation = ScheduleValidator.validate(problem, baseline.assignments());
+        Validation improvedValidation = ScheduleValidator.validate(problem, improved.assignments());
+
+        assertThat(baseline.assignments()).isNotEmpty();
+        assertThat(baselineValidation.violations()).isEmpty();
+        assertThat(improvedValidation.violations()).isEmpty();
+        assertThat(improved.score()).contains(improvedValidation.score());
+        assertThat(improvedValidation.score()).isLessThanOrEqualTo(baselineValidation.score());
     }
 
     @ParameterizedTest(name = "{0} with a {1}-second limit")

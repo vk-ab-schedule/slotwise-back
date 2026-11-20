@@ -8,6 +8,7 @@ dependencies {
     api(project(":domain-model"))
     implementation(libs.ortools)
     testImplementation(project(":datagen"))
+    testImplementation(project(":solver-greedy"))
 }
 
 tasks.test {
