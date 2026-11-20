@@ -29,6 +29,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class CpsatSolver implements SchedulingSolver {
 
+    private static final double NANOS_PER_SECOND = 1_000_000_000d;
+    private static final double DETERMINISTIC_UNITS_PER_SECOND = 0.1;
+
     static {
         Loader.loadNativeLibraries();
     }
@@ -75,7 +78,8 @@ public final class CpsatSolver implements SchedulingSolver {
             schedule.hint(run.best.assignments());
         }
         schedule.model.maximize(schedule.assignedCount);
-        Search coverage = search(run, schedule);
+        double searchBudget = run.budgetNanos / NANOS_PER_SECOND * DETERMINISTIC_UNITS_PER_SECOND;
+        Search coverage = search(run, schedule, searchBudget);
         if (coverage.status() == CpSolverStatus.INFEASIBLE || run.best == null) {
             return;
         }
@@ -87,15 +91,22 @@ public final class CpsatSolver implements SchedulingSolver {
             return;
         }
 
+        double qualityBudget = searchBudget - coverage.solver().response().getDeterministicTime();
+        if (qualityBudget <= 0) {
+            return;
+        }
+
         run.checkpoint();
         var penalty = new CpsatObjective(schedule, run::checkpoint).expression();
         schedule.model.addEquality(schedule.assignedCount, run.best.assignments().size());
         schedule.hint(run.best.assignments());
         schedule.model.minimize(penalty);
-        Search quality = search(run, schedule);
+        Search quality = search(run, schedule, qualityBudget);
+
         if (quality.status() == CpSolverStatus.INFEASIBLE) {
             throw new IllegalStateException("The penalty model excluded a feasible schedule");
         }
+
         if (quality.status() == CpSolverStatus.OPTIMAL) {
             long provenPenalty = quality.solver().value(penalty);
             if (provenPenalty != run.best.score().penalty()) {
@@ -131,15 +142,16 @@ public final class CpsatSolver implements SchedulingSolver {
         }
     }
 
-    private Search search(Run run, CpsatModel schedule) {
-        long budget = run.checkpoint();
+    private Search search(Run run, CpsatModel schedule, double deterministicBudget) {
+        long wallTimeBudget = run.checkpoint();
         CpSolver solver = new CpSolver();
         solver.getParameters()
                 .setNumWorkers(1)
                 .setRandomSeed(Long.hashCode(run.params.seed()) & Integer.MAX_VALUE)
                 // Probing the reified scheduling constraints can consume the whole search budget before the first incumbent.
                 .setCpModelProbingLevel(0)
-                .setMaxTimeInSeconds(budget / 1_000_000_000d);
+                .setMaxDeterministicTime(deterministicBudget)
+                .setMaxTimeInSeconds(wallTimeBudget / NANOS_PER_SECOND);
         var latest = new AtomicReference<Incumbent>();
         var callbackFailure = new AtomicReference<RuntimeException>();
 
@@ -167,7 +179,7 @@ public final class CpsatSolver implements SchedulingSolver {
                 if (Thread.currentThread().isInterrupted() || run.remainingNanos() <= 0) {
                     solver.stopSearch();
                 }
-                run.consider(latest.getAndSet(null));
+                run.consider(latest.get());
                 try {
                     status = search.get(20, TimeUnit.MILLISECONDS);
                     break;
@@ -180,7 +192,8 @@ public final class CpsatSolver implements SchedulingSolver {
             if (callbackFailure.get() != null) {
                 throw callbackFailure.get();
             }
-            run.consider(latest.getAndSet(null));
+            // Keep the first candidate for each best score regardless of how often progress was sampled.
+            run.consider(latest.get());
             if (status == CpSolverStatus.MODEL_INVALID) {
                 throw new IllegalStateException("Invalid CP-SAT model: " + solver.solutionInfo());
             }
