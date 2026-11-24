@@ -58,7 +58,7 @@ public class SolvingController {
                     + "parameters; if the session already has an active calculation, returns that job. Otherwise "
                     + "queues a job with its queue position. Any signed seed is valid. Optional baseVariantId must "
                     + "belong to this session; its assignments provide the baseline for S5 and its locks enforce H9. "
-                    + "Poll getSolverJob for progress. Completion creates a validated draft when a solution exists; "
+                    + "Poll getSolverJob for progress and best known quality (unassigned events, then penalty). Completion creates a validated draft when a solution exists; "
                     + "it never publishes automatically. A time limit without a solution is NO_SOLUTION, "
                     + "not a proof of infeasibility or a technical failure.")
     public SolverJobResponse solveSession(@PathVariable("id") @Min(1) long id,
@@ -72,7 +72,7 @@ public class SolvingController {
                     + "QUEUED, RUNNING, COMPLETED, FAILED and CANCELLED describe execution, while solveStatus "
                     + "describes the solver result. COMPLETED may have NO_SOLUTION and a null resultId; only FAILED "
                     + "denotes a technical error. A completed feasible or optimal result links to a draft variant. "
-                    + "Unavailable progress, queue position, error, result and timestamps are explicit nulls.")
+                    + "Unavailable progress, quality, queue position, error, result and timestamps are explicit nulls.")
     public SolverJobResponse getSolverJob(@PathVariable("id") @Min(1) long id) {
         throw ContractStub.notImplemented();
     }

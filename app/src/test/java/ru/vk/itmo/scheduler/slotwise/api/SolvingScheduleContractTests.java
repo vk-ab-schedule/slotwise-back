@@ -180,11 +180,15 @@ class SolvingScheduleContractTests extends ApiContractTestBase {
                 .andReturn().getResponse().getContentAsString();
         var document = JsonPath.parse(json);
         List<String> jobRequired = document.read("$.components.schemas.SolverJobResponse.required");
-        for (String field : List.of("progress", "queuePosition", "error", "resultId", "startedAt", "finishedAt")) {
+        for (String field : List.of("progress", "quality", "queuePosition", "error", "resultId", "startedAt", "finishedAt")) {
             assertTrue(jobRequired.contains(field), "Polling field must always be present: " + field);
             Map<String, Object> property = document.read("$.components.schemas.SolverJobResponse.properties." + field);
             assertTrue(allowsNull(property), "Polling field must allow null: " + field);
         }
+        List<String> qualityRequired = document.read("$.components.schemas.SolverJobQuality.required");
+        assertTrue(qualityRequired.containsAll(List.of("unassignedEvents", "penalty", "bestBound")));
+        Map<String, Object> bound = document.read("$.components.schemas.SolverJobQuality.properties.bestBound");
+        assertTrue(allowsNull(bound), "Penalty bound is unavailable for some solvers");
         List<String> metricsRequired = document.read("$.components.schemas.ScheduleMetrics.required");
         assertTrue(metricsRequired.containsAll(List.of("penalty", "hardViolations", "unassignedEvents", "gapsHours",
                 "commissionLoadRangeHours", "commissionLoadStandardDeviationHours", "undesirableEvents",

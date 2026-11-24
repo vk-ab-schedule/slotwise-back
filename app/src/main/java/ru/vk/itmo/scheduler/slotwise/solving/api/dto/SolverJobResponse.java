@@ -24,6 +24,9 @@ public record SolverJobResponse(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true,
                 description = "Fraction in [0, 1], or null when the solver cannot estimate progress",
                 minimum = "0", maximum = "1") Double progress,
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true,
+                description = "Best solution currently known for this job; null until a solution is found")
+        Quality quality,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true, minimum = "1",
                 description = "One-based position while queued; null outside the queue") Integer queuePosition,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true,
@@ -36,6 +39,15 @@ public record SolverJobResponse(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true) Instant startedAt,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true) Instant finishedAt,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED) long version) {
+
+    @Schema(name = "SolverJobQuality", description = "Solutions are compared by unassignedEvents first, then by penalty")
+    public record Quality(
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0") int unassignedEvents,
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0") long penalty,
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true, minimum = "0",
+                    description = "Lower bound on penalty at this unassigned event count, if available")
+            Long bestBound) {
+    }
 
     @Schema(name = "SolverJobFailure", description = "Technical failure without stack traces or private participant data")
     public record Failure(@NotNull String code, @NotNull String message) {
