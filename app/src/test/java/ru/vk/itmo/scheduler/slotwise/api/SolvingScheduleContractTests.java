@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -141,11 +142,37 @@ class SolvingScheduleContractTests extends ApiContractTestBase {
 
     @Test
     void personalScheduleRequiresAnInstantRange() throws Exception {
-        mvc.perform(get("/api/me/schedule")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/me/schedule"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         mvc.perform(get("/api/me/schedule").param("from", "2027-01-01T00:00:00Z"))
                 .andExpect(status().isBadRequest());
         mvc.perform(get("/api/me/schedule").param("from", "2027-01-01")
-                .param("to", "2027-02-01T00:00:00Z")).andExpect(status().isBadRequest());
+                .param("to", "2027-02-01T00:00:00Z"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2027-01-01T00:00:00Z", "2026-12-31T23:59:59Z"})
+    void rejectsEmptyOrReversedPersonalScheduleRange(String to) throws Exception {
+        mvc.perform(get("/api/me/schedule")
+                        .param("from", "2027-01-01T00:00:00Z")
+                        .param("to", to))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("INVALID_SCHEDULE_RANGE"));
+    }
+
+    @Test
+    void documentsThePersonalScheduleRangeProblem() throws Exception {
+        String response = "$.paths['/api/me/schedule'].get.responses['400']";
+        mvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(response + ".description").value(containsString("INVALID_SCHEDULE_RANGE when from >= to")))
+                .andExpect(jsonPath(response + ".description").value(containsString("INVALID_REQUEST")))
+                .andExpect(jsonPath(response + ".content['application/problem+json'].schema['$ref']")
+                        .value("#/components/schemas/ApiProblem"));
     }
 
     @Test
