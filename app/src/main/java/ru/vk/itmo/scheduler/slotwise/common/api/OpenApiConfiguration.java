@@ -111,6 +111,11 @@ public class OpenApiConfiguration {
             }
             errors.forEach((code, description) -> operation.getResponses().addApiResponse(code,
                     problemResponse(description)));
+            if ("getPersonalSchedule".equals(operation.getOperationId())) {
+                operation.getResponses().addApiResponse("400", problemResponse(
+                        "Returns INVALID_SCHEDULE_RANGE when from >= to. Missing or malformed date parameters "
+                                + "return INVALID_REQUEST."));
+            }
             if (List.of("login", "getCurrentUser", "getMyBusyCalendar", "replaceMyBusyCalendar",
                     "submitMyBusyCalendar", "getCollection", "closeCollection", "changeCollectionDeadline",
                     "getSessionRules", "replaceSessionRules").contains(operation.getOperationId())) {
