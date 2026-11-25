@@ -1,24 +1,31 @@
 package ru.vk.itmo.scheduler.slotwise.solving;
 
+import com.jayway.jsonpath.JsonPath;
+import jakarta.servlet.http.Cookie;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
 import ru.vk.itmo.scheduler.slotwise.ApiTestSupport;
 
 import java.util.UUID;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
  * A planning session in the database for solving tests: Monday to Friday 18–22 January 2027, 9:00–19:00 UTC,
  * one room for ten people, a teacher who supervises a student, and a second student.
  */
-final class SessionFixture {
-    final long organizer;
-    final long teacher;
-    final long student;
-    final long otherStudent;
-    final long room;
-    final long session;
+public final class SessionFixture {
+    public final long organizer;
+    public final long teacher;
+    public final long student;
+    public final long otherStudent;
+    public final long room;
+    public final long session;
     private final JdbcTemplate jdbc;
 
-    SessionFixture(ApiTestSupport api, JdbcTemplate jdbc) {
+    public SessionFixture(ApiTestSupport api, JdbcTemplate jdbc) {
         this.jdbc = jdbc;
         organizer = api.account("ORGANIZER");
         teacher = api.account("TEACHER");
@@ -46,14 +53,14 @@ final class SessionFixture {
     /**
      * A 30-minute consultation of the student with the teacher, its supervisor.
      */
-    long consultation(boolean complete) {
+    public long consultation(boolean complete) {
         long event = event("Консультация с научным руководителем", 30, complete);
         participant(event, student, "STUDENT");
         participant(event, teacher, "SUPERVISOR");
         return event;
     }
 
-    long event(String type, int minutes, boolean complete) {
+    public long event(String type, int minutes, boolean complete) {
         return jdbc.queryForObject("""
                 insert into slotwise.event(planning_session_id, event_type_id, title, duration_minutes, format,
                     commission_size, requires_chair, preparation_days, complete)
@@ -62,29 +69,52 @@ final class SessionFixture {
                 """, Long.class, session, minutes, complete, type);
     }
 
-    void participant(long event, long person, String role) {
+    public void participant(long event, long person, String role) {
         jdbc.update("insert into slotwise.event_participant values (?, ?, ?, ?)", session, event, person, role);
     }
 
-    void needsEquipment(long event, String name) {
+    public void needsEquipment(long event, String name) {
         long equipment = jdbc.queryForObject("insert into slotwise.equipment(name) values (?) returning id", Long.class,
                 name + " " + UUID.randomUUID());
         jdbc.update("insert into slotwise.event_equipment values (?, ?)", event, equipment);
     }
 
-    void submitted(long person) {
+    public void submitted(long person) {
         jdbc.update("""
                 update slotwise.session_participant set response_status = 'SUBMITTED', submitted_at = now()
                 where planning_session_id = ? and account_id = ?
                 """, session, person);
     }
 
-    void classes(long person, String startsAt, String endsAt) {
+    public void classes(long person, String startsAt, String endsAt) {
         jdbc.update("insert into slotwise.timetable_entry(account_id, starts_at, ends_at) values (?, ?::timestamptz, ?::timestamptz)",
                 person, startsAt, endsAt);
     }
 
-    String path(String suffix) {
+    public String path(String suffix) {
         return "/api/sessions/" + session + "/" + suffix;
+    }
+
+    /**
+     * Runs greedy with this seed on the current input and returns the draft variant it created.
+     */
+    public long draft(MockMvc mvc, ApiTestSupport api, Cookie organizerSession, long seed) throws Exception {
+        long version = jdbc.queryForObject("select input_version from slotwise.planning_session where id = ?",
+                Long.class, session);
+        String job = mvc.perform(post(path("solve")).cookie(organizerSession).with(api.xsrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                {"expectedInputVersion": %d, "algorithm": "GREEDY", "timeLimitSeconds": 1, "seed": %d}
+                                """.formatted(version, seed)))
+                .andReturn().getResponse().getContentAsString();
+        long id = JsonPath.<Number>read(job, "$.id").longValue();
+        for (int attempt = 0; attempt < 300; attempt++) {
+            String body = mvc.perform(get("/api/jobs/" + id).cookie(organizerSession))
+                    .andReturn().getResponse().getContentAsString();
+            if ("COMPLETED".equals(JsonPath.read(body, "$.status"))) {
+                return JsonPath.<Number>read(body, "$.resultId").longValue();
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("Job " + id + " did not complete");
     }
 }
