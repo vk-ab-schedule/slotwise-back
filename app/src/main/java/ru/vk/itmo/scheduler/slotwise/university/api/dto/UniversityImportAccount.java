@@ -18,7 +18,8 @@ public record UniversityImportAccount(
         @NotNull AccountRole role,
         @NotBlank @Size(max = 64) String timeZone,
         @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
-        @Schema(accessMode = Schema.AccessMode.WRITE_ONLY, description = "Optional Spring {algorithm}hash; omitted means login is disabled")
+        @Schema(accessMode = Schema.AccessMode.WRITE_ONLY,
+                description = "Spring {bcrypt} hash. Omit to create an account without login or keep its existing hash.")
         @Pattern(regexp = "\\{[^}]+}.+", message = "Password hash must have the format {algorithm}hash")
         String passwordHash) {
     @Override

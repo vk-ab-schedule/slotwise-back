@@ -55,6 +55,18 @@ class DatasetGeneratorTests {
                 .isNotEqualTo(DatasetGenerator.problem(DatasetProfile.M, 2).people());
     }
 
+    @Test
+    void onlinePlatformKeepsTheSameExternalIdAcrossDemoProfiles() {
+        var small = DatasetGenerator.university(DatasetProfile.S, 42).rooms();
+        var medium = DatasetGenerator.university(DatasetProfile.M, 42).rooms();
+
+        assertThat(small.stream().filter(UniversityData.Room::online).map(UniversityData.Room::externalId).toList())
+                .containsExactlyElementsOf(medium.stream().filter(UniversityData.Room::online)
+                        .map(UniversityData.Room::externalId).toList());
+        assertThat(Stream.concat(small.stream(), medium.stream()).filter(room -> !room.online()))
+                .noneMatch(room -> room.externalId().equals("room-online"));
+    }
+
     @ParameterizedTest
     @EnumSource(DatasetProfile.class)
     void sizesFollowTheProfile(DatasetProfile profile) {

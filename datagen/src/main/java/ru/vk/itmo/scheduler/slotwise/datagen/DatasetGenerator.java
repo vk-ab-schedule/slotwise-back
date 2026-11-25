@@ -226,7 +226,7 @@ public final class DatasetGenerator {
             groupData.add(new UniversityData.Group(groupId(g), groupId(g), groups.get(g).stream().map(this::accountId).toList()));
         }
         List<UniversityData.Room> roomData = rooms.stream().map(room -> room.online()
-                ? new UniversityData.Room(roomId(room.id()), "Онлайн-площадка", null, true, null, List.of())
+                ? new UniversityData.Room("room-online", "Онлайн-площадка", null, true, null, List.of())
                 : new UniversityData.Room(roomId(room.id()), String.valueOf(1100 + 100 * (int) (room.id() % 4) + room.id()),
                 BUILDINGS.get((int) (room.id() % BUILDINGS.size())), false, room.capacity(),
                 room.equipment().stream().map(e -> e == PROJECTOR ? "Проектор" : "Компьютеры").toList())).toList();
