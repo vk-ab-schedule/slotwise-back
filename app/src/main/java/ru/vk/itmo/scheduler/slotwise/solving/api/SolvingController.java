@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.solving.SolvingService;
 import ru.vk.itmo.scheduler.slotwise.solving.api.dto.PrecheckRequest;
 import ru.vk.itmo.scheduler.slotwise.solving.api.dto.PrecheckResponse;
@@ -60,18 +59,20 @@ public class SolvingController {
     @PostMapping(ApiPaths.SESSIONS + "/{id}/solve")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(operationId = "solveSession", summary = "Queue a manual calculation",
-            description = "ORGANIZER owner only. Snapshots input at expectedInputVersion; a version mismatch is 409. "
-                    + "May run before collection closes; such results are marked incomplete and retain missing "
+            description = "ORGANIZER owner only. Snapshots input at expectedInputVersion; a version mismatch is 409 "
+                    + "STALE_INPUT_VERSION, an unavailable algorithm is 409 SOLVER_UNAVAILABLE. May run before collection closes; such results are marked incomplete and retain missing "
                     + "respondents. Reuses an identical request for the same session, input version, algorithm and "
                     + "parameters; if the session already has an active calculation, returns that job. Otherwise "
                     + "queues a job with its queue position. Any signed seed is valid. Optional baseVariantId must "
-                    + "belong to this session; its assignments provide the baseline for S5 and its locks enforce H9. "
+                    + "belong to this session (404 VARIANT_NOT_FOUND); its assignments provide the baseline for S5 and its "
+                    + "locks enforce H9 and stay locked in the new draft. "
                     + "Poll getSolverJob for progress and best known quality (unassigned events, then penalty). Completion creates a validated draft when a solution exists; "
                     + "it never publishes automatically. A time limit without a solution is NO_SOLUTION, "
                     + "not a proof of infeasibility or a technical failure.")
     public SolverJobResponse solveSession(@PathVariable("id") @Min(1) long id,
-                                          @Valid @RequestBody SolveRequest request) {
-        throw ContractStub.notImplemented();
+                                          @Valid @RequestBody SolveRequest request,
+                                          @AuthenticationPrincipal AccountPrincipal organizer) {
+        return solving.solve(id, organizer.getAccountId(), request);
     }
 
     @GetMapping(ApiPaths.JOBS + "/{id}")
@@ -80,8 +81,11 @@ public class SolvingController {
                     + "QUEUED, RUNNING, COMPLETED, FAILED and CANCELLED describe execution, while solveStatus "
                     + "describes the solver result. COMPLETED may have NO_SOLUTION and a null resultId; only FAILED "
                     + "denotes a technical error. A completed feasible or optimal result links to a draft variant. "
-                    + "Unavailable progress, quality, queue position, error, result and timestamps are explicit nulls.")
-    public SolverJobResponse getSolverJob(@PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+                    + "Unavailable progress, quality, queue position, error, result and timestamps are explicit nulls. "
+                    + "Progress is the elapsed share of the time limit. Error codes: SOLVER_FAILED, and INTERRUPTED "
+                    + "for jobs left unfinished by a server restart; both may be launched again.")
+    public SolverJobResponse getSolverJob(@PathVariable("id") @Min(1) long id,
+                                          @AuthenticationPrincipal AccountPrincipal organizer) {
+        return solving.job(id, organizer.getAccountId());
     }
 }

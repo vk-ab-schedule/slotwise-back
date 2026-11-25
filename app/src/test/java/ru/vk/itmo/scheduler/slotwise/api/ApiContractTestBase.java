@@ -16,7 +16,9 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRepository;
 import ru.vk.itmo.scheduler.slotwise.account.AccountService;
+import ru.vk.itmo.scheduler.slotwise.schedule.VariantStore;
 import ru.vk.itmo.scheduler.slotwise.solving.ProblemLoader;
+import ru.vk.itmo.scheduler.slotwise.solving.SolverJobRunner;
 import ru.vk.itmo.scheduler.slotwise.solving.SolvingService;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -42,6 +44,10 @@ public abstract class ApiContractTestBase {
     protected SolvingService solvingService;
     @MockitoBean
     private ProblemLoader problemLoader;
+    @MockitoBean
+    private SolverJobRunner solverJobRunner;
+    @MockitoBean
+    private VariantStore variantStore;
     @MockitoBean
     protected PlanningAvailabilityService availability;
     @Autowired

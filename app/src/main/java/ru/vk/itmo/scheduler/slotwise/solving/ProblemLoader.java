@@ -3,6 +3,7 @@ package ru.vk.itmo.scheduler.slotwise.solving;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
+import ru.vk.itmo.scheduler.slotwise.domain.Assignment;
 import ru.vk.itmo.scheduler.slotwise.domain.CommissionCandidate;
 import ru.vk.itmo.scheduler.slotwise.domain.Dependency;
 import ru.vk.itmo.scheduler.slotwise.domain.Event;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -126,6 +128,60 @@ public class ProblemLoader {
                 .weights(new Weights(weights.teacherGaps(), weights.commissionLoadSpread(), weights.undesirableTime(),
                         weights.teacherRoomChanges(), weights.movedEvents()))
                 .build();
+    }
+
+    /**
+     * The problem with a variant of the session as the baseline for S5, its locked assignments pinned (H9).
+     * Assignments of events, rooms or commission members that are no longer part of the problem are left out.
+     */
+    public Problem withBaseline(Problem problem, long variantId) {
+        var params = Map.of("variant", variantId);
+        var members = new HashMap<Long, List<Long>>();
+        var chairs = new HashMap<Long, Long>();
+        jdbc.query("""
+                select event_id, account_id, chair from slotwise.assignment_commission_member
+                where schedule_variant_id = :variant
+                """, params, rs -> {
+            members.computeIfAbsent(rs.getLong(1), id -> new ArrayList<>()).add(rs.getLong(2));
+            if (rs.getBoolean(3)) {
+                chairs.put(rs.getLong(1), rs.getLong(2));
+            }
+        });
+        Set<Long> events = problem.events().stream().map(Event::id).collect(Collectors.toSet());
+        Set<Long> rooms = problem.rooms().stream().map(Room::id).collect(Collectors.toSet());
+        Set<Long> people = problem.people().stream().map(Person::id).collect(Collectors.toSet());
+        Set<Long> canChair = problem.commissionPool().stream().filter(CommissionCandidate::canChair)
+                .map(CommissionCandidate::personId).collect(Collectors.toSet());
+        var grid = problem.grid();
+        var baseline = new ArrayList<Assignment>();
+        var pinned = new ArrayList<Assignment>();
+        jdbc.query("""
+                select event_id, starts_at, room_id, locked from slotwise.assignment
+                where schedule_variant_id = :variant and status = 'ASSIGNED'
+                """, params, rs -> {
+            long event = rs.getLong(1);
+            long minutes = Duration.between(grid.origin(), rs.getTimestamp(2).toInstant()).toMinutes();
+            var commission = members.getOrDefault(event, List.of());
+            Long chair = chairs.get(event);
+            if (!events.contains(event) || !rooms.contains(rs.getLong(3)) || !people.containsAll(commission)
+                    || chair != null && !canChair.contains(chair) || minutes < 0
+                    || minutes / SLOT_MINUTES + problem.event(event).duration() > grid.slotCount()) {
+                return;
+            }
+            var assignment = new Assignment(event, (int) (minutes / SLOT_MINUTES), rs.getLong(3), commission,
+                    chair == null ? OptionalLong.empty() : OptionalLong.of(chair));
+            baseline.add(assignment);
+            if (rs.getBoolean(4)) {
+                pinned.add(assignment);
+            }
+        });
+        return problem.toBuilder().pinned(pinned).baseline(baseline).build();
+    }
+
+    public boolean variantOf(long variantId, long sessionId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                select exists(select 1 from slotwise.schedule_variant where id = :variant and planning_session_id = :session)
+                """, Map.of("variant", variantId, "session", sessionId), Boolean.class));
     }
 
     /**

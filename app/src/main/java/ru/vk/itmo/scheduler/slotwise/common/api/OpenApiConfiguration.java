@@ -42,6 +42,7 @@ public class OpenApiConfiguration {
             "getCurrentUser",
             "getMyBusyCalendar",
             "getSessionRules",
+            "getSolverJob",
             "listAccounts",
             "listSolvers",
             "login",
@@ -51,6 +52,7 @@ public class OpenApiConfiguration {
             "setAccountEnabled",
             "setAccountPassword",
             "setAccountRole",
+            "solveSession",
             "submitMyBusyCalendar",
             "updateAccount");
 

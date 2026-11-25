@@ -3,10 +3,16 @@ package ru.vk.itmo.scheduler.slotwise.schedule.api.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import ru.vk.itmo.scheduler.slotwise.domain.Weights;
+import ru.vk.itmo.scheduler.slotwise.domain.validation.SoftConstraint;
+import ru.vk.itmo.scheduler.slotwise.domain.validation.Validation;
 import ru.vk.itmo.scheduler.slotwise.solving.SolveStatus;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.Arrays;
 import java.util.List;
+import java.util.OptionalLong;
 
 @JsonInclude(JsonInclude.Include.ALWAYS)
 @Schema(description = "Metrics recomputed by the common domain validator. Compare (U, P) lexicographically: "
@@ -45,4 +51,32 @@ public record ScheduleMetrics(
                 + "FEASIBLE does not prove optimality; NO_SOLUTION does not prove infeasibility") SolveStatus solveStatus,
         @NotNull @Schema(description = "Exactly one component for each S1-S5, including zero penalties; their weighted sum is P")
         List<ScoreComponent> scoreComponents) {
+
+    /**
+     * Metrics of a schedule checked by the validator; {@code penaltyBound} is the proven lower bound of P, if known.
+     */
+    public static ScheduleMetrics of(Validation validation, Weights weights, SolveStatus status, long runtimeMillis,
+                                     OptionalLong penaltyBound) {
+        var raw = validation.rawPenalties();
+        int[] weight = {weights.teacherGaps(), weights.commissionLoadSpread(), weights.undesirableTime(),
+                weights.teacherRoomChanges(), weights.movedEvents()};
+        var components = Arrays.stream(SoftConstraint.values()).map(constraint -> {
+            long value = raw.getOrDefault(constraint, 0L);
+            int constraintWeight = weight[constraint.ordinal()];
+            return new ScoreComponent(ScheduleConstraint.valueOf(constraint.name()), value, constraintWeight,
+                    value * constraintWeight);
+        }).toList();
+        long penalty = validation.score().penalty();
+        BigDecimal bound = penaltyBound.isPresent() ? BigDecimal.valueOf(penaltyBound.getAsLong()) : null;
+        BigDecimal gap = bound == null ? null : penalty == 0 ? BigDecimal.ZERO
+                : BigDecimal.valueOf(penalty).subtract(bound).divide(BigDecimal.valueOf(penalty), 4, RoundingMode.HALF_UP);
+        return new ScheduleMetrics(penalty, validation.violations().size(), validation.score().unassigned(),
+                hours(raw.getOrDefault(SoftConstraint.S1, 0L)), hours(raw.getOrDefault(SoftConstraint.S2, 0L)),
+                hours(validation.commissionLoadStdDevMinutes()), validation.undesirableEvents(),
+                Math.toIntExact(raw.getOrDefault(SoftConstraint.S4, 0L)), runtimeMillis, bound, gap, status, components);
+    }
+
+    private static BigDecimal hours(double minutes) {
+        return BigDecimal.valueOf(minutes / 60).setScale(2, RoundingMode.HALF_UP);
+    }
 }
