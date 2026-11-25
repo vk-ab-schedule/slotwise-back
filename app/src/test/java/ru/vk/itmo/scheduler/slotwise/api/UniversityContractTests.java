@@ -54,18 +54,8 @@ class UniversityContractTests extends ApiContractTestBase {
             """;
 
     @ParameterizedTest
-    @MethodSource("catalogPaths")
-    void catalogPaginationAcceptsItsBoundariesAndReachesTheStub(String path) throws Exception {
-        mvc.perform(get(path)).andExpect(status().isNotImplemented());
-        mvc.perform(get(path).param("page", "0").param("size", "1").param("search", "Иван"))
-                .andExpect(status().isNotImplemented());
-        mvc.perform(get(path).param("page", "1").param("size", "100"))
-                .andExpect(status().isNotImplemented());
-    }
-
-    @ParameterizedTest
     @MethodSource("invalidCatalogQueries")
-    void invalidPaginationIsRejectedBeforeTheStub(String path, String parameter, String value) throws Exception {
+    void invalidPaginationIsRejected(String path, String parameter, String value) throws Exception {
         mvc.perform(get(path).param(parameter, value))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
@@ -84,7 +74,6 @@ class UniversityContractTests extends ApiContractTestBase {
     @ParameterizedTest
     @ValueSource(strings = {"people", "groups", "rooms", "disciplines", "equipment", "teachings", "timetable"})
     void catalogDetailRejectsNonPositiveIds(String resource) throws Exception {
-        mvc.perform(get("/api/university/" + resource + "/1")).andExpect(status().isNotImplemented());
         mvc.perform(get("/api/university/" + resource + "/0")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/university/" + resource + "/-1")).andExpect(status().isBadRequest());
     }
@@ -191,6 +180,13 @@ class UniversityContractTests extends ApiContractTestBase {
         assertRequired(document, "UniversityImportResponse", "dryRun", "allowPartial", "applied", "summary", "sections", "diagnostics");
         Map<String, Map<String, Object>> paths = document.read("$.paths");
         for (String resource : CATALOGS) {
+            String catalogPath = "/api/university/" + resource;
+            String detailPath = catalogPath + (resource.equals("supervisions") ? "/{studentId}/{supervisorId}" : "/{id}");
+            for (String path : List.of(catalogPath, detailPath)) {
+                Map<String, Object> responses = document.read("$.paths['" + path + "'].get.responses");
+                assertTrue(responses.containsKey("200"), path);
+                assertFalse(responses.containsKey("501"), path);
+            }
             String adminPath = "/api/admin/" + resource;
             assertTrue(paths.entrySet().stream()
                     .filter(entry -> entry.getKey().equals(adminPath) || entry.getKey().startsWith(adminPath + "/"))
