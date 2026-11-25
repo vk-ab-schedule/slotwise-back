@@ -58,6 +58,7 @@ public class OpenApiConfiguration {
             "setAccountRole",
             "solveSession",
             "submitMyBusyCalendar",
+            "updateAssignment",
             "updateAccount");
 
     @Bean

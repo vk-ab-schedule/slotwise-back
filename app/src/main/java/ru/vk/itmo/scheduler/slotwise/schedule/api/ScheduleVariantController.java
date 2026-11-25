@@ -83,15 +83,18 @@ public class ScheduleVariantController {
                     + "requires start/end, the selected physical room or online platform, and a valid commission. "
                     + "Times are UTC instants on 5-minute boundaries, end follows start and duration matches the "
                     + "event. UNASSIGNED clears times/resource/commission. The same domain validator checks H1-H9 "
-                    + "and recomputes (U, P) with S1-S5 and preparation days H10: hard violations return 422 with issues and never persist. dryRun=true "
+                    + "and recomputes (U, P) with S1-S5 and preparation days H10 on the current session data: violations "
+                    + "involving the edited event return 422 HARD_VIOLATIONS with issues and never persist; a malformed "
+                    + "assignment returns 422 INVALID_ASSIGNMENT, stale versions 409 STALE_VARIANT_VERSION. dryRun=true "
                     + "returns a preview, metrics and affected account IDs without changing either version. Saving "
                     + "atomically changes the assignment and variant versions. Locking enforces H9 in later solves; "
                     + "it does not publish. A conflicting lock is never silently removed.")
     public AssignmentUpdateResponse updateAssignment(@PathVariable("id") @Min(1) long id,
                                                      @PathVariable("eventId") @Min(1) long eventId,
                                                      @RequestParam(name = "dryRun", defaultValue = "false") boolean dryRun,
-                                                     @Valid @RequestBody AssignmentUpdateRequest request) {
-        throw ContractStub.notImplemented();
+                                                     @Valid @RequestBody AssignmentUpdateRequest request,
+                                                     @AuthenticationPrincipal AccountPrincipal organizer) {
+        return variants.update(id, eventId, organizer.getAccountId(), dryRun, request);
     }
 
     @PostMapping(ApiPaths.VARIANTS + "/{id}/publish")

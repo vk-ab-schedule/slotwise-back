@@ -7,11 +7,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.vk.itmo.scheduler.slotwise.common.ApiException;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiIssue;
+import ru.vk.itmo.scheduler.slotwise.common.api.IssueSeverity;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
+import ru.vk.itmo.scheduler.slotwise.domain.Assignment;
+import ru.vk.itmo.scheduler.slotwise.domain.validation.ScheduleValidator;
 import ru.vk.itmo.scheduler.slotwise.eventtype.EventFormat;
 import ru.vk.itmo.scheduler.slotwise.eventtype.ParticipantRole;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningSessionRepository;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentResponse;
+import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentUpdateRequest;
+import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentUpdateResponse;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.PersonalScheduleEventResponse;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.PersonalScheduleResponse;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.PublishVariantRequest;
@@ -21,6 +26,8 @@ import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.ScheduleParticipantRespons
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.ScheduleRoomResponse;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.VariantResponse;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.VariantSummaryResponse;
+import ru.vk.itmo.scheduler.slotwise.solving.ProblemLoader;
+import ru.vk.itmo.scheduler.slotwise.solving.SolveStatus;
 import ru.vk.itmo.scheduler.slotwise.solving.SolverAlgorithm;
 import ru.vk.itmo.scheduler.slotwise.solving.api.dto.SolverParameters;
 import tools.jackson.databind.json.JsonMapper;
@@ -29,6 +36,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -37,7 +45,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -62,6 +72,7 @@ public class VariantService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final PlanningSessionRepository sessions;
+    private final ProblemLoader loader;
     private final JsonMapper json;
     private final Clock clock;
 
@@ -131,6 +142,70 @@ public class VariantService {
     }
 
     /**
+     * Moves, unassigns or locks one event of a draft (UX-14). The common validator checks the whole variant on the
+     * current data; violations that involve the edited event return 422 and nothing is saved. A dry run only previews.
+     */
+    @Transactional
+    public AssignmentUpdateResponse update(long variantId, long eventId, long user, boolean dryRun,
+                                           AssignmentUpdateRequest request) {
+        var header = ownHeader(variantId, user);
+        if (header.status() != ScheduleVariantStatus.DRAFT) {
+            throw new ApiException(HttpStatus.CONFLICT, "VARIANT_NOT_DRAFT", "Править можно только черновик");
+        }
+        var params = Map.of("variant", variantId, "event", eventId);
+        record Current(long version, int durationMinutes) {
+        }
+        var current = jdbc.query("""
+                select a.version, e.duration_minutes from slotwise.assignment a join slotwise.event e on e.id = a.event_id
+                where a.schedule_variant_id = :variant and a.event_id = :event
+                """, params, (rs, row) -> new Current(rs.getLong(1), rs.getInt(2))).stream().findFirst()
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ASSIGNMENT_NOT_FOUND", "Событие не найдено в варианте"));
+        if (header.version() != request.expectedVariantVersion() || current.version() != request.expectedAssignmentVersion()) {
+            throw stale();
+        }
+
+        var input = loader.load(sessions.findById(header.sessionId()).orElseThrow());
+        var problem = (header.baseVariantId() == null ? input : loader.withBaseline(input, header.baseVariantId()))
+                .toBuilder().clearPinned().build();
+        List<Assignment> assignments = new ArrayList<>(loader.withBaseline(input, variantId).baseline().stream()
+                .filter(assignment -> assignment.eventId() != eventId).toList());
+        if (request.status() == AssignmentStatus.ASSIGNED) {
+            assignments.add(edited(eventId, request, problem.grid().origin(), current.durationMinutes()));
+        } else if (request.startsAt() != null || request.endsAt() != null || request.roomId() != null
+                || !request.commissionMembers().isEmpty() || request.locked()) {
+            throw invalid("У неназначенного события нет времени, аудитории, комиссии и фиксации");
+        }
+        var validation = ScheduleValidator.validate(problem, assignments);
+        var issues = validation.violations().stream().filter(violation -> violation.eventIds().contains(eventId))
+                .map(violation -> new ApiIssue(violation.reason().name(), violation.message(), IssueSeverity.ERROR,
+                        violation.eventIds(), violation.personIds(), violation.roomIds()))
+                .toList();
+        if (!issues.isEmpty()) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "HARD_VIOLATIONS",
+                    "Правка нарушает жёсткие ограничения", Map.of("issues", issues));
+        }
+        // After a manual edit the proven bound no longer applies, so the variant is not known to be optimal.
+        var metrics = ScheduleMetrics.of(validation, problem.weights(), SolveStatus.FEASIBLE,
+                header.metrics().runtimeMillis(), OptionalLong.empty());
+        var affected = new TreeSet<>(jdbc.queryForList("""
+                select account_id from slotwise.event_participant where event_id = :event
+                union select account_id from slotwise.assignment_commission_member
+                where schedule_variant_id = :variant and event_id = :event
+                """, params, Long.class));
+        request.commissionMembers().forEach(member -> affected.add(member.accountId()));
+
+        long variantVersion = header.version();
+        long assignmentVersion = current.version();
+        if (!dryRun) {
+            save(header.sessionId(), variantId, eventId, request, metrics);
+            variantVersion++;
+            assignmentVersion++;
+        }
+        return new AssignmentUpdateResponse(variantId, variantVersion, dryRun,
+                preview(eventId, request, assignmentVersion), metrics, List.copyOf(affected), List.of());
+    }
+
+    /**
      * Assigned events of the current publications where the person takes part or sits on the commission.
      * An event is marked changed if the previous publication placed it differently or did not have it.
      */
@@ -174,6 +249,103 @@ public class VariantService {
                     participants.getOrDefault(row.eventId(), List.of()), commission, changed);
         }).toList();
         return new PersonalScheduleResponse(from, to, timeZone, result);
+    }
+
+    private static Assignment edited(long eventId, AssignmentUpdateRequest request, Instant origin, int durationMinutes) {
+        if (request.startsAt() == null || request.endsAt() == null || request.roomId() == null) {
+            throw invalid("Назначенному событию нужны начало, конец и аудитория");
+        }
+        Duration fromOrigin = Duration.between(origin, request.startsAt());
+        if (fromOrigin.isNegative() || fromOrigin.toSeconds() % 300 != 0 || request.startsAt().getNano() != 0
+                || !Duration.between(request.startsAt(), request.endsAt()).equals(Duration.ofMinutes(durationMinutes))) {
+            throw invalid("Время должно быть внутри периода, кратно 5 минутам и совпадать с длительностью события");
+        }
+        var chairs = request.commissionMembers().stream().filter(AssignmentUpdateRequest.CommissionMember::chair)
+                .map(AssignmentUpdateRequest.CommissionMember::accountId).toList();
+        if (chairs.size() > 1) {
+            throw invalid("У комиссии может быть только один председатель");
+        }
+        return new Assignment(eventId, Math.toIntExact(fromOrigin.toMinutes() / 5), request.roomId(),
+                request.commissionMembers().stream().map(AssignmentUpdateRequest.CommissionMember::accountId).toList(),
+                chairs.isEmpty() ? OptionalLong.empty() : OptionalLong.of(chairs.getFirst()));
+    }
+
+    private void save(long sessionId, long variantId, long eventId, AssignmentUpdateRequest request,
+                      ScheduleMetrics metrics) {
+        var params = new HashMap<String, Object>();
+        params.put("variant", variantId);
+        params.put("event", eventId);
+        params.put("status", request.status().name());
+        params.put("startsAt", request.startsAt() == null ? null : Timestamp.from(request.startsAt()));
+        params.put("endsAt", request.endsAt() == null ? null : Timestamp.from(request.endsAt()));
+        params.put("room", request.roomId());
+        params.put("locked", request.locked());
+        params.put("assignmentVersion", request.expectedAssignmentVersion());
+        params.put("variantVersion", request.expectedVariantVersion());
+        params.put("metrics", json.writeValueAsString(metrics));
+        params.put("penalty", metrics.penalty());
+        jdbc.update("""
+                delete from slotwise.assignment_commission_member where schedule_variant_id = :variant and event_id = :event
+                """, params);
+        int changed = jdbc.update("""
+                update slotwise.assignment set status = :status, starts_at = :startsAt, ends_at = :endsAt, room_id = :room,
+                    locked = :locked, explanation = null, version = version + 1
+                where schedule_variant_id = :variant and event_id = :event and version = :assignmentVersion
+                """, params);
+        changed += jdbc.update("""
+                update slotwise.schedule_variant set metrics = cast(:metrics as jsonb), objective = :penalty,
+                    best_bound = null, solve_status = 'FEASIBLE', version = version + 1
+                where id = :variant and version = :variantVersion
+                """, params);
+        if (changed != 2) {
+            throw stale();
+        }
+        for (var member : request.commissionMembers()) {
+            jdbc.update("""
+                    insert into slotwise.assignment_commission_member(planning_session_id, schedule_variant_id, event_id,
+                        account_id, chair)
+                    values (:session, :variant, :event, :account, :chair)
+                    """, Map.of("session", sessionId, "variant", variantId, "event", eventId,
+                    "account", member.accountId(), "chair", member.chair()));
+        }
+    }
+
+    /**
+     * The assignment as the request describes it, with the names of its room and commission.
+     */
+    private AssignmentResponse preview(long eventId, AssignmentUpdateRequest request, long version) {
+        var participants = participants(List.of(eventId));
+        var members = new HashMap<Long, ScheduleCommissionMemberResponse>();
+        if (!request.commissionMembers().isEmpty()) {
+            Set<Long> chairs = request.commissionMembers().stream().filter(AssignmentUpdateRequest.CommissionMember::chair)
+                    .map(AssignmentUpdateRequest.CommissionMember::accountId).collect(Collectors.toSet());
+            jdbc.query("select id, last_name, first_name, patronymic from slotwise.account where id in (:ids)",
+                    Map.of("ids", request.commissionMembers().stream()
+                            .map(AssignmentUpdateRequest.CommissionMember::accountId).toList()),
+                    rs -> {
+                        members.put(rs.getLong(1), new ScheduleCommissionMemberResponse(rs.getLong(1), rs.getString(2),
+                                rs.getString(3), rs.getString(4), chairs.contains(rs.getLong(1))));
+                    });
+        }
+        var room = request.roomId() == null ? null : jdbc.queryForObject(
+                "select id, name, building, online from slotwise.room where id = :room",
+                Map.of("room", request.roomId()), (rs, row) -> room(rs, 1));
+        return jdbc.queryForObject("""
+                select event_type_id, title, format, duration_minutes from slotwise.event where id = :event
+                """, Map.of("event", eventId), (rs, row) -> new AssignmentResponse(eventId, rs.getLong(1),
+                rs.getString(2), EventFormat.valueOf(rs.getString(3)), rs.getInt(4),
+                participants.getOrDefault(eventId, List.of()), request.status(), request.startsAt(), request.endsAt(),
+                room, request.commissionMembers().stream().map(member -> members.get(member.accountId())).toList(),
+                request.locked(), version, List.of()));
+    }
+
+    private static ApiException invalid(String message) {
+        return new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "INVALID_ASSIGNMENT", message);
+    }
+
+    private static ApiException stale() {
+        return new ApiException(HttpStatus.CONFLICT, "STALE_VARIANT_VERSION",
+                "Вариант изменился; обновите его и повторите запрос");
     }
 
     private VariantResponse response(Header header) {
