@@ -271,14 +271,8 @@ public class PlanningAvailabilityService {
     }
 
     private CollectionStatus status(PlanningSessionEntity session) {
-        Instant now = clock.instant();
-        if (session.getCollectionStatus() == CollectionStatus.CLOSED || !now.isBefore(session.getCollectionEndsAt())) {
-            return CollectionStatus.CLOSED;
-        }
-        if (now.isBefore(session.getCollectionStartsAt())) {
-            return CollectionStatus.PENDING;
-        }
-        return CollectionStatus.OPEN;
+        return session.getCollectionStatus().effectiveAt(clock.instant(), session.getCollectionStartsAt(),
+                session.getCollectionEndsAt());
     }
 
     private void requireOpen(PlanningSessionEntity session) {
