@@ -17,6 +17,7 @@ import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.DynamicInsert;
 import org.hibernate.annotations.Generated;
+import org.hibernate.annotations.OptimisticLock;
 import org.hibernate.annotations.SourceType;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.generator.EventType;
@@ -39,6 +40,8 @@ public class AccountEntity {
     private String email;
 
     @Pattern(regexp = "\\{[^}]+}.+", message = "Password hash must have the format {algorithm}hash")
+    // Setting a password answers 204 without the account, so it must not make the client's version stale.
+    @OptimisticLock(excluded = true)
     private String passwordHash;
 
     private String firstName;

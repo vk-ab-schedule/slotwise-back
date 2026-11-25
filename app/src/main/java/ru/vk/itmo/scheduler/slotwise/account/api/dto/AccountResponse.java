@@ -1,6 +1,7 @@
 package ru.vk.itmo.scheduler.slotwise.account.api.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import ru.vk.itmo.scheduler.slotwise.account.AccountEntity;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRole;
 
 import java.time.Instant;
@@ -20,4 +21,11 @@ public record AccountResponse(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "0") long version,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED) Instant createdAt,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED) Instant updatedAt) {
+
+    public static AccountResponse of(AccountEntity account) {
+        return new AccountResponse(account.getId(), account.getExternalId(), account.getEmail(), account.getLastName(),
+                account.getFirstName(), account.getPatronymic(), account.getRole(), account.getTimeZone(),
+                account.getEnabled(), account.getPasswordHash() != null, account.getVersion(), account.getCreatedAt(),
+                account.getUpdatedAt());
+    }
 }

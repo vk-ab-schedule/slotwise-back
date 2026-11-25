@@ -2,6 +2,7 @@ package ru.vk.itmo.scheduler.slotwise.account;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
+import ru.vk.itmo.scheduler.slotwise.account.api.dto.SetAccountPasswordRequest;
 
 /**
  * First administrator, created at startup when there is no administrator yet (D-03).
@@ -14,7 +15,7 @@ public record AdminProperties(
         @DefaultValue("Администратор") String firstName,
         @DefaultValue("SlotWise") String lastName) {
 
-    static final int MIN_PASSWORD_LENGTH = 8;
+    static final int MIN_PASSWORD_LENGTH = SetAccountPasswordRequest.MIN_LENGTH;
 
     @Override
     public String toString() {

@@ -9,9 +9,11 @@ import jakarta.validation.constraints.Size;
 
 public record SetAccountPasswordRequest(
         @NotNull @PositiveOrZero Long expectedVersion,
-        @NotBlank @Size(max = 128)
+        @NotBlank @Size(min = SetAccountPasswordRequest.MIN_LENGTH, max = 128)
         @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
         @Schema(accessMode = Schema.AccessMode.WRITE_ONLY, format = "password") String password) {
+    public static final int MIN_LENGTH = 8;
+
     @Override
     public String toString() {
         return "SetAccountPasswordRequest[expectedVersion=" + expectedVersion + ", password=***]";

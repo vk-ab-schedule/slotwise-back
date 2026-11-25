@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRole;
+import ru.vk.itmo.scheduler.slotwise.common.api.IanaTimeZone;
 
 public record CreateAccountRequest(
         @Size(max = 255) @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true) String externalId,
@@ -14,5 +15,5 @@ public record CreateAccountRequest(
         @NotBlank @Size(max = 100) String firstName,
         @Size(max = 100) @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true) String patronymic,
         @NotNull AccountRole role,
-        @NotBlank @Size(max = 64) @Schema(example = "Europe/Moscow") String timeZone) {
+        @NotBlank @Size(max = 64) @IanaTimeZone @Schema(example = "Europe/Moscow") String timeZone) {
 }

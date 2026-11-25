@@ -29,6 +29,29 @@ import java.util.Set;
 
 @Configuration(proxyBeanMethods = false)
 public class OpenApiConfiguration {
+    /**
+     * Implemented operations, they do not document the 501 contract stub. One per line in alphabetical order,
+     * so that parallel PRs do not conflict here.
+     */
+    private static final Set<String> IMPLEMENTED = Set.of(
+            "changeCollectionDeadline",
+            "closeCollection",
+            "createAccount",
+            "getAccount",
+            "getCollection",
+            "getCurrentUser",
+            "getMyBusyCalendar",
+            "getSessionRules",
+            "listAccounts",
+            "login",
+            "replaceMyBusyCalendar",
+            "replaceSessionRules",
+            "setAccountEnabled",
+            "setAccountPassword",
+            "setAccountRole",
+            "submitMyBusyCalendar",
+            "updateAccount");
+
     @Bean
     OpenApiCustomizer nullableReferences() {
         return api -> api.getComponents().getSchemas().values().forEach(OpenApiConfiguration::normalizeNullableReferences);
@@ -111,9 +134,7 @@ public class OpenApiConfiguration {
             }
             errors.forEach((code, description) -> operation.getResponses().addApiResponse(code,
                     problemResponse(description)));
-            if (List.of("login", "getCurrentUser", "getMyBusyCalendar", "replaceMyBusyCalendar",
-                    "submitMyBusyCalendar", "getCollection", "closeCollection", "changeCollectionDeadline",
-                    "getSessionRules", "replaceSessionRules").contains(operation.getOperationId())) {
+            if (IMPLEMENTED.contains(operation.getOperationId())) {
                 operation.getResponses().remove("501");
             }
             RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(), RequestMapping.class);
