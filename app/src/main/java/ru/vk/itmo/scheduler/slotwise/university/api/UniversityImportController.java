@@ -31,6 +31,7 @@ public class UniversityImportController {
             description = "Dry run previews changes without writing to the database. Accounts, groups, rooms and "
                     + "disciplines match by external ID; links and timetable rows match by their fields. "
                     + "Apply can persist valid records despite domain errors only with allowPartial=true. "
+                    + "A role change for a planning participant is reported as a warning. "
                     + "Invalid JSON or DTO fields return 400. Diagnostics never echo credentials.")
     public UniversityImportResponse importUniversityData(
             @RequestParam(name = "dryRun", defaultValue = "true") boolean dryRun,
@@ -44,6 +45,7 @@ public class UniversityImportController {
             description = "Доступно только администратору. Используется для подготовки демонстрации системы на синтетических данных. "
                     + "В dataset выбирается профиль: S — малый, M — средний, L — большой, TIGHT — с урезанной доступностью. "
                     + "Обязательный seed позволяет воспроизвести набор при одинаковых настройках генератора. "
+                    + "Разные пары профиля и seed создают отдельные наборы; повторный импорт той же пары не создаёт дублей. "
                     + "Данные записываются через тот же сервис, что и JSON-импорт.")
     public UniversityDemoDataResponse generateUniversityDemoData(
             @Valid @RequestBody UniversityDemoDataRequest request) {

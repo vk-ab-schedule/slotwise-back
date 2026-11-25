@@ -77,6 +77,10 @@ class ImportStore {
                 """, name, id);
     }
 
+    boolean isPlanningParticipant(long accountId) {
+        return exists("select exists(select from slotwise.session_participant where account_id = ?)", accountId);
+    }
+
     void saveAccount(String externalId, Row<Account> previous, Row<Account> row) {
         var a = row.value;
         var fields = new Object[]{a.email(), a.firstName(), a.lastName(), a.patronymic(), a.role().name(),

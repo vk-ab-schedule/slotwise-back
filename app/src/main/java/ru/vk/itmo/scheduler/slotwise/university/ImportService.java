@@ -40,10 +40,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class ImportService {
@@ -135,13 +136,18 @@ public class ImportService {
         private final Set<Long> affectedDisciplines = new HashSet<>();
 
         private <T> UniversityImportCounts section(String section, List<T> rows, Function<T, Outcome> inspect) {
+            return section(section, rows, (row, _) -> inspect.apply(row));
+        }
+
+        private <T> UniversityImportCounts section(String section, List<T> rows, BiFunction<T, String, Outcome> inspect) {
             var counts = new int[Outcome.values().length];
             for (int index = 0; index < rows.size(); index++) {
+                String path = section + "[" + index + "]";
                 try {
-                    counts[inspect.apply(rows.get(index)).ordinal()]++;
+                    counts[inspect.apply(rows.get(index), path).ordinal()]++;
                 } catch (Rejected rejected) {
                     counts[Outcome.REJECTED.ordinal()]++;
-                    diagnostics.add(new UniversityImportDiagnostic(section + "[" + index + "]" + rejected.field,
+                    diagnostics.add(new UniversityImportDiagnostic(path + rejected.field,
                             new ApiIssue(rejected.code, rejected.getMessage(), IssueSeverity.ERROR,
                                     List.of(), List.of(), List.of())));
                 }
@@ -151,7 +157,7 @@ public class ImportService {
                     counts[Outcome.REJECTED.ordinal()]);
         }
 
-        private Outcome account(UniversityImportAccount input) {
+        private Outcome account(UniversityImportAccount input, String path) {
             var previous = accounts.claim(input.externalId());
             String email = input.email().strip().toLowerCase(Locale.ROOT);
             require(!emails.contains(email) && !store.emailUsedByOther(email, idOf(previous)),
@@ -170,10 +176,18 @@ public class ImportService {
             }
             var next = new Account(email, input.firstName(), input.lastName(), input.patronymic(), input.role(),
                     input.timeZone(), hash);
+            boolean roleChanged = previous != null && previous.value.role() != next.role();
+            if (roleChanged && store.isPlanningParticipant(previous.id)) {
+                diagnostics.add(new UniversityImportDiagnostic(path + ".role",
+                        new ApiIssue("PLANNING_PARTICIPANT_ROLE_CHANGED",
+                                "The account participates in planning sessions. Its account role will change from "
+                                        + previous.value.role() + " to " + next.role() + "; event roles stay unchanged",
+                                IssueSeverity.WARNING, List.of(), List.of(previous.id), List.of())));
+            }
             emails.add(email);
             return stage(accounts, input.externalId(), previous, next, row -> {
                 store.saveAccount(input.externalId(), previous, row);
-                if (previous != null && previous.value.role() != next.role()) {
+                if (roleChanged) {
                     affectedAccounts.add(row.id);
                 }
             });
