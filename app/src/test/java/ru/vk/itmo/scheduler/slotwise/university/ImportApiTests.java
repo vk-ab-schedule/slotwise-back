@@ -8,6 +8,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -15,6 +16,7 @@ import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
 import ru.vk.itmo.scheduler.slotwise.datagen.DatasetGenerator;
 import ru.vk.itmo.scheduler.slotwise.datagen.DatasetProfile;
 import ru.vk.itmo.scheduler.slotwise.datagen.UniversityData;
+import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityGroupResponse;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.Map;
@@ -49,10 +51,7 @@ class ImportApiTests {
     @Test
     void previewsAndImportsTheSameSmallDatasetWithoutDuplicates() throws Exception {
         UniversityData data = DatasetGenerator.university(DatasetProfile.S, 42);
-        String body = json.writeValueAsString(Map.of(
-                "accounts", data.accounts(), "groups", data.groups(), "rooms", data.rooms(),
-                "disciplines", data.disciplines(), "teaching", data.teaching(),
-                "supervision", data.supervision(), "timetable", data.timetable()));
+        String body = importBody(data);
         long initialAccounts = count("account");
         long initialTimetable = count("timetable_entry");
         long initialGroupMembers = count("study_group_member");
@@ -267,6 +266,40 @@ class ImportApiTests {
         mvc.perform(post("/api/admin/demo-data").with(user("organizer").roles("ORGANIZER")).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"dataset\":\"S\",\"seed\":42}"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void organizerReadsGroupAndStudentIdsAfterImportingGeneratedDataset() throws Exception {
+        UniversityData data = DatasetGenerator.university(DatasetProfile.S, 44);
+        mvc.perform(applyJson(importBody(data)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.applied").value(true))
+                .andExpect(jsonPath("$.summary.rejected").value(0));
+
+        UniversityData.Group group = data.groups().getFirst();
+        assertThat(group.students()).isNotEmpty();
+        long groupId = jdbc.queryForObject("select id from slotwise.study_group where external_id = ?", Long.class, group.externalId());
+        var expectedStudentIds = new NamedParameterJdbcTemplate(jdbc).queryForList(
+                "select id from slotwise.account where external_id in (:externalIds)",
+                Map.of("externalIds", group.students()), Long.class);
+        assertThat(expectedStudentIds).hasSameSizeAs(group.students());
+
+        var organizer = data.accounts().stream().filter(account -> account.role() == UniversityData.Role.ORGANIZER)
+                .findFirst().orElseThrow();
+        Cookie session = login(organizer.email(), DatasetGenerator.DEMO_PASSWORD, "ORGANIZER");
+        byte[] response = mvc.perform(get("/api/university/groups/{id}", groupId).cookie(session))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+        var actual = json.readValue(response, UniversityGroupResponse.class);
+        assertThat(actual.externalId()).isEqualTo(group.externalId());
+        assertThat(actual.studentIds()).containsExactlyInAnyOrderElementsOf(expectedStudentIds);
+    }
+
+    private String importBody(UniversityData data) {
+        return json.writeValueAsString(Map.of(
+                "accounts", data.accounts(), "groups", data.groups(), "rooms", data.rooms(),
+                "disciplines", data.disciplines(), "teaching", data.teaching(),
+                "supervision", data.supervision(), "timetable", data.timetable()));
     }
 
     private static MockHttpServletRequestBuilder applyJson(String body) {
