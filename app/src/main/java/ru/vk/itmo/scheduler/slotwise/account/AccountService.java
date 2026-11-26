@@ -132,7 +132,7 @@ public class AccountService {
 
     public void setPassword(long id, long actorId, String actorSessionId, SetAccountPasswordRequest request) {
         if (request.password().getBytes(StandardCharsets.UTF_8).length > SetAccountPasswordRequest.MAX_UTF8_BYTES) {
-            String message = "Пароль должен занимать не более 72 байт в UTF-8";
+            String message = "Пароль слишком длинный.";
             throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", message,
                     Map.of("fieldErrors", List.of(new FieldViolation("password", message))));
         }
