@@ -1,6 +1,10 @@
 package ru.vk.itmo.scheduler.slotwise.api;
 
 import org.mockito.Mockito;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import ru.vk.itmo.scheduler.slotwise.eventtype.EventTypeCatalog;
+import ru.vk.itmo.scheduler.slotwise.planning.PlanningEventService;
+import ru.vk.itmo.scheduler.slotwise.planning.SessionPreparationService;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityService;
 import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -38,6 +42,14 @@ public abstract class ApiContractTestBase {
     protected AccountService accountService;
     @MockitoBean
     protected PlanningAvailabilityService availability;
+    @MockitoBean
+    private JdbcClient jdbc;
+    @MockitoBean
+    private SessionPreparationService sessions;
+    @MockitoBean
+    private PlanningEventService events;
+    @MockitoBean
+    private EventTypeCatalog eventTypes;
     @Autowired
     private WebApplicationContext context;
     protected MockMvc mvc;
