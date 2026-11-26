@@ -35,8 +35,8 @@ public interface AccountRepository extends JpaRepository<AccountEntity, Long> {
     Page<AccountEntity> search(String pattern, AccountRole role, Boolean enabled, Pageable pageable);
 
     /**
-     * Locks the enabled accounts of the role: two concurrent changes cannot both remove the last administrator.
+     * Locks enabled accounts with a password in id order to protect the last administrator who can sign in.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    List<AccountEntity> findByRoleAndEnabledTrue(AccountRole role);
+    List<AccountEntity> findByRoleAndEnabledTrueAndPasswordHashIsNotNullOrderById(AccountRole role);
 }

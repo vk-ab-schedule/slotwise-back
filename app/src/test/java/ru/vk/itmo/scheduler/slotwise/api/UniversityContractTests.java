@@ -9,11 +9,16 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityDemoDataRequest;
+import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityDemoDataset;
 
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -54,18 +59,8 @@ class UniversityContractTests extends ApiContractTestBase {
             """;
 
     @ParameterizedTest
-    @MethodSource("catalogPaths")
-    void catalogPaginationAcceptsItsBoundariesAndReachesTheStub(String path) throws Exception {
-        mvc.perform(get(path)).andExpect(status().isNotImplemented());
-        mvc.perform(get(path).param("page", "0").param("size", "1").param("search", "Иван"))
-                .andExpect(status().isNotImplemented());
-        mvc.perform(get(path).param("page", "1").param("size", "100"))
-                .andExpect(status().isNotImplemented());
-    }
-
-    @ParameterizedTest
     @MethodSource("invalidCatalogQueries")
-    void invalidPaginationIsRejectedBeforeTheStub(String path, String parameter, String value) throws Exception {
+    void invalidPaginationIsRejected(String path, String parameter, String value) throws Exception {
         mvc.perform(get(path).param(parameter, value))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
@@ -84,7 +79,6 @@ class UniversityContractTests extends ApiContractTestBase {
     @ParameterizedTest
     @ValueSource(strings = {"people", "groups", "rooms", "disciplines", "equipment", "teachings", "timetable"})
     void catalogDetailRejectsNonPositiveIds(String resource) throws Exception {
-        mvc.perform(get("/api/university/" + resource + "/1")).andExpect(status().isNotImplemented());
         mvc.perform(get("/api/university/" + resource + "/0")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/university/" + resource + "/-1")).andExpect(status().isBadRequest());
     }
@@ -127,16 +121,17 @@ class UniversityContractTests extends ApiContractTestBase {
             "?dryRun=false&allowPartial=true"})
     void architectureImportAcceptsExternalReferencesAndOptionalPasswordHashes(String query) throws Exception {
         mvc.perform(post("/api/admin/import" + query).contentType(MediaType.APPLICATION_JSON).content(IMPORT))
-                .andExpect(status().isNotImplemented())
-                .andExpect(content().string(not(containsString("contract-secret"))))
-                .andExpect(content().string(not(containsString("ivanov@example.org"))));
+                .andExpect(status().isOk());
+        verify(universityImport).importData(argThat(body -> body.accounts().get(0).passwordHash() == null
+                        && body.teaching().getFirst().teacher().equals("t-17")),
+                eq(!query.contains("dryRun=false")), eq(query.contains("allowPartial=true")));
     }
 
     @Test
     void importsOnlinePlatformWithoutCapacityAndRejectsInconsistentCapacity() throws Exception {
         mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
                         .content(IMPORT.replace("\"capacity\":30", "\"online\":true,\"capacity\":null")))
-                .andExpect(status().isNotImplemented());
+                .andExpect(status().isOk());
         mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
                         .content(IMPORT.replace("\"capacity\":30", "\"online\":true,\"capacity\":30")))
                 .andExpect(status().isBadRequest());
@@ -148,10 +143,10 @@ class UniversityContractTests extends ApiContractTestBase {
     @Test
     void nestedImportValidationDoesNotEchoCredentials() throws Exception {
         mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
-                        .content(IMPORT.replace("{bcrypt}$2a$10$contract-secret", "plain-contract-secret")))
+                        .content(IMPORT.replace("teacher@example.org", "invalid-email")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'accounts[1].passwordHash')]").isNotEmpty())
-                .andExpect(content().string(not(containsString("plain-contract-secret"))));
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'accounts[1].email')]").isNotEmpty())
+                .andExpect(content().string(not(containsString("contract-secret"))));
         mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
                         .content(IMPORT.replace("\"students\":[\"s-1001\"]", "\"students\":[null]")))
                 .andExpect(status().isBadRequest());
@@ -176,7 +171,8 @@ class UniversityContractTests extends ApiContractTestBase {
     void demoDatasetsUseAnExplicitSeed(String dataset) throws Exception {
         mvc.perform(post("/api/admin/demo-data").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"dataset\":\"" + dataset + "\",\"seed\":0}"))
-                .andExpect(status().isNotImplemented());
+                .andExpect(status().isOk());
+        verify(universityImport).importDemo(new UniversityDemoDataRequest(UniversityDemoDataset.valueOf(dataset), 0L));
     }
 
     @Test
@@ -191,6 +187,13 @@ class UniversityContractTests extends ApiContractTestBase {
         assertRequired(document, "UniversityImportResponse", "dryRun", "allowPartial", "applied", "summary", "sections", "diagnostics");
         Map<String, Map<String, Object>> paths = document.read("$.paths");
         for (String resource : CATALOGS) {
+            String catalogPath = "/api/university/" + resource;
+            String detailPath = catalogPath + (resource.equals("supervisions") ? "/{studentId}/{supervisorId}" : "/{id}");
+            for (String path : List.of(catalogPath, detailPath)) {
+                Map<String, Object> responses = document.read("$.paths['" + path + "'].get.responses");
+                assertTrue(responses.containsKey("200"), path);
+                assertFalse(responses.containsKey("501"), path);
+            }
             String adminPath = "/api/admin/" + resource;
             assertTrue(paths.entrySet().stream()
                     .filter(entry -> entry.getKey().equals(adminPath) || entry.getKey().startsWith(adminPath + "/"))
@@ -211,13 +214,17 @@ class UniversityContractTests extends ApiContractTestBase {
     @Test
     void openApiImportIsJsonOnlyUsesExactArchitectureKeysAndKeepsHashesWriteOnly() throws Exception {
         DocumentContext document = specification();
+        Map<String, Object> responses = document.read("$.paths['/api/admin/import'].post.responses");
+        assertFalse(responses.containsKey("501"));
         Map<String, Object> content = document.read("$.paths['/api/admin/import'].post.requestBody.content");
         assertEquals(List.of("application/json"), List.copyOf(content.keySet()));
         Map<String, Object> properties = document.read("$.components.schemas.UniversityImportRequest.properties");
         assertEquals(7, properties.size());
         assertTrue(properties.keySet().containsAll(List.of("accounts", "groups", "rooms", "disciplines",
                 "teaching", "supervision", "timetable")));
-        assertEquals(Boolean.TRUE, document.read("$.components.schemas.UniversityImportAccount.properties.passwordHash.writeOnly"));
+        Map<String, Object> passwordHash = document.read("$.components.schemas.UniversityImportAccount.properties.passwordHash");
+        assertEquals(Boolean.TRUE, passwordHash.get("writeOnly"));
+        assertFalse(passwordHash.containsKey("pattern"));
         List<String> required = document.read("$.components.schemas.UniversityImportAccount.required");
         assertFalse(required.contains("passwordHash"));
         List<Map<String, Object>> parameters = document.read("$.paths['/api/admin/import'].post.parameters");
@@ -233,6 +240,16 @@ class UniversityContractTests extends ApiContractTestBase {
                 if (fields != null) assertFalse(fields.containsKey("passwordHash"), schema.getKey());
             }
         }
+    }
+
+    @Test
+    void openApiDocumentsInvalidTimetableRange() throws Exception {
+        DocumentContext document = specification();
+        String response = "$.paths['/api/university/timetable'].get.responses['400']";
+        String description = document.read(response + ".description");
+        assertTrue(description.contains("INVALID_TIMETABLE_RANGE when startsAt >= endsAt"));
+        assertEquals("#/components/schemas/ApiProblem",
+                document.read(response + ".content['application/problem+json'].schema['$ref']"));
     }
 
     @Test

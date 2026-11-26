@@ -353,7 +353,8 @@ final class CpsatModel {
             this.event = event;
             String key = Long.toString(event.id());
             assigned = model.newBoolVar("assigned_" + key);
-            start = model.newIntVar(0, problem.grid().slotCount() - event.duration(), "start_" + key);
+            // With no candidate starts, the room constraints force the event to remain unassigned.
+            start = model.newIntVar(0, Math.max(0, problem.grid().slotCount() - event.duration()), "start_" + key);
             day = model.newIntVar(0, problem.grid().dayOf(problem.grid().slotCount() - 1), "date_" + key);
             roomCode = model.newIntVar(0, roomCodes.size(), "venue_" + key);
             problem.grid().workingPeriods().forEach(window -> {

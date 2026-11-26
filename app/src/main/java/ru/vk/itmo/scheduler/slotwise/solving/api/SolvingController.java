@@ -59,20 +59,21 @@ public class SolvingController {
     @PostMapping(ApiPaths.SESSIONS + "/{id}/solve")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(operationId = "solveSession", summary = "Queue a manual calculation",
-            description = "ORGANIZER owner only. Snapshots input at expectedInputVersion; a version mismatch is 409 "
-                    + "STALE_INPUT_VERSION, an unavailable algorithm is 409 SOLVER_UNAVAILABLE. May run before collection closes; such results are marked incomplete and retain missing "
-                    + "respondents. Reuses an identical request for the same session, input version, algorithm and "
-                    + "parameters; if the session already has an active calculation, returns that job. Otherwise "
-                    + "queues a job with its queue position. Any signed seed is valid. Optional baseVariantId must "
-                    + "belong to this session (404 VARIANT_NOT_FOUND); its assignments provide the baseline for S5 and its "
-                    + "locks enforce H9 and stay locked in the new draft. "
-                    + "Poll getSolverJob for progress and best known quality (unassigned events, then penalty). Completion creates a validated draft when a solution exists; "
-                    + "it never publishes automatically. A time limit without a solution is NO_SOLUTION, "
-                    + "not a proof of infeasibility or a technical failure.")
+            description = "ORGANIZER owner only. A mismatched input version returns 409 STALE_INPUT_VERSION, "
+                    + "and an unavailable algorithm returns 409 SOLVER_UNAVAILABLE. Returns any active job of the "
+                    + "session first. Otherwise it reuses a completed job for the same input, algorithm, parameters "
+                    + "and base variant version, or queues a new one. A new run records whether collection was open "
+                    + "or responses were missing at launch. Any signed seed is valid. The optional baseVariantId "
+                    + "must belong to the session (404 VARIANT_NOT_FOUND). Its assignments provide the S5 baseline "
+                    + "and its locks remain in the new draft. Conflicting locks return 409 PINNED_CONFLICT with issues. "
+                    + "Poll getSolverJob for progress and quality. A valid solution creates a draft; a run without "
+                    + "a solution completes with NO_SOLUTION. Publication is a separate operation.")
     public SolverJobResponse solveSession(@PathVariable("id") @Min(1) long id,
                                           @Valid @RequestBody SolveRequest request,
                                           @AuthenticationPrincipal AccountPrincipal organizer) {
-        return solving.solve(id, organizer.getAccountId(), request);
+        long user = organizer.getAccountId();
+        long job = solving.enqueue(id, user, request);
+        return solving.job(job, user);
     }
 
     @GetMapping(ApiPaths.JOBS + "/{id}")
@@ -82,6 +83,7 @@ public class SolvingController {
                     + "describes the solver result. COMPLETED may have NO_SOLUTION and a null resultId; only FAILED "
                     + "denotes a technical error. A completed feasible or optimal result links to a draft variant. "
                     + "Unavailable progress, quality, queue position, error, result and timestamps are explicit nulls. "
+                    + "Completed quality and solveStatus describe the original calculation. "
                     + "Progress is the elapsed share of the time limit. Error codes: SOLVER_FAILED, and INTERRUPTED "
                     + "for jobs left unfinished by a server restart; both may be launched again.")
     public SolverJobResponse getSolverJob(@PathVariable("id") @Min(1) long id,

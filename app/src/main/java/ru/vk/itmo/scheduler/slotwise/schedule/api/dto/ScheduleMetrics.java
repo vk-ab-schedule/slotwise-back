@@ -57,6 +57,11 @@ public record ScheduleMetrics(
      */
     public static ScheduleMetrics of(Validation validation, Weights weights, SolveStatus status, long runtimeMillis,
                                      OptionalLong penaltyBound) {
+        return of(validation, weights, status, runtimeMillis, penaltyBound, validation.violations().size());
+    }
+
+    public static ScheduleMetrics of(Validation validation, Weights weights, SolveStatus status, long runtimeMillis,
+                                     OptionalLong penaltyBound, int hardViolations) {
         var raw = validation.rawPenalties();
         int[] weight = {weights.teacherGaps(), weights.commissionLoadSpread(), weights.undesirableTime(),
                 weights.teacherRoomChanges(), weights.movedEvents()};
@@ -70,10 +75,17 @@ public record ScheduleMetrics(
         BigDecimal bound = penaltyBound.isPresent() ? BigDecimal.valueOf(penaltyBound.getAsLong()) : null;
         BigDecimal gap = bound == null ? null : penalty == 0 ? BigDecimal.ZERO
                 : BigDecimal.valueOf(penalty).subtract(bound).divide(BigDecimal.valueOf(penalty), 4, RoundingMode.HALF_UP);
-        return new ScheduleMetrics(penalty, validation.violations().size(), validation.score().unassigned(),
+        return new ScheduleMetrics(status == SolveStatus.NO_SOLUTION ? null : penalty, hardViolations,
+                validation.score().unassigned(),
                 hours(raw.getOrDefault(SoftConstraint.S1, 0L)), hours(raw.getOrDefault(SoftConstraint.S2, 0L)),
                 hours(validation.commissionLoadStdDevMinutes()), validation.undesirableEvents(),
                 Math.toIntExact(raw.getOrDefault(SoftConstraint.S4, 0L)), runtimeMillis, bound, gap, status, components);
+    }
+
+    public ScheduleMetrics withUnassignedEvents(int count) {
+        return new ScheduleMetrics(penalty, hardViolations, count, gapsHours, commissionLoadRangeHours,
+                commissionLoadStandardDeviationHours, undesirableEvents, teacherRoomChanges, runtimeMillis,
+                bestBound, gap, solveStatus, scoreComponents);
     }
 
     private static BigDecimal hours(double minutes) {

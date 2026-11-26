@@ -34,7 +34,9 @@ public final class TimeGrid {
     private final ZoneId zone;
     private final int slotMinutes;
     private final int slotCount;
-    /** Sorted, non-overlapping; each period within one day. */
+    /**
+     * Sorted, non-overlapping; each period within one day.
+     */
     private final List<SlotRange> workingPeriods;
     @Getter(AccessLevel.NONE)
     @EqualsAndHashCode.Exclude
@@ -107,15 +109,39 @@ public final class TimeGrid {
      * busy time 10:12–10:48 covers slots 10:10–10:50. Empty if the interval is outside the grid.
      */
     public Optional<SlotRange> covering(Instant start, Instant end) {
+        requireNonEmptyInterval(start, end);
+        return clippedRange(floorSlot(start), ceilSlot(end));
+    }
+
+    /**
+     * Slots entirely inside the interval, rounded inward for working periods.
+     */
+    public Optional<SlotRange> containedIn(Instant start, Instant end) {
+        requireNonEmptyInterval(start, end);
+        return clippedRange(ceilSlot(start), floorSlot(end));
+    }
+
+    private long floorSlot(Instant instant) {
+        return Math.floorDiv(Duration.between(origin, instant).getSeconds(), slotMinutes * 60L);
+    }
+
+    private long ceilSlot(Instant instant) {
+        Duration offset = Duration.between(origin, instant);
+        long slotSeconds = slotMinutes * 60L;
+        long floor = Math.floorDiv(offset.getSeconds(), slotSeconds);
+        return Math.floorMod(offset.getSeconds(), slotSeconds) == 0 && offset.getNano() == 0 ? floor : floor + 1;
+    }
+
+    private Optional<SlotRange> clippedRange(long start, long end) {
+        long first = Math.max(start, 0);
+        long last = Math.min(end, slotCount);
+        return first < last ? Optional.of(new SlotRange((int) first, (int) last)) : Optional.empty();
+    }
+
+    private static void requireNonEmptyInterval(Instant start, Instant end) {
         if (!start.isBefore(end)) {
             throw new IllegalArgumentException("Interval must not be empty: " + start + " – " + end);
         }
-        long slotSeconds = slotMinutes * 60L;
-        long first = Math.floorDiv(Duration.between(origin, start).toSeconds(), slotSeconds);
-        long last = -Math.floorDiv(-Duration.between(origin, end).toSeconds(), slotSeconds);
-        first = Math.max(first, 0);
-        last = Math.min(last, slotCount);
-        return first < last ? Optional.of(new SlotRange((int) first, (int) last)) : Optional.empty();
     }
 
     /**

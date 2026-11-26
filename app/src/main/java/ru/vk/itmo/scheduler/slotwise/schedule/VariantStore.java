@@ -8,13 +8,11 @@ import ru.vk.itmo.scheduler.slotwise.domain.Assignment;
 import ru.vk.itmo.scheduler.slotwise.domain.Event;
 import ru.vk.itmo.scheduler.slotwise.domain.Problem;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.ScheduleMetrics;
-import ru.vk.itmo.scheduler.slotwise.solving.SolveStatus;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -35,12 +33,6 @@ public class VariantStore {
     public record Draft(long sessionId, long snapshotId, long jobId, Long baseVariantId, Problem problem,
                         List<Assignment> assignments, Set<Long> locked, ScheduleMetrics metrics,
                         Map<Long, List<ApiIssue>> explanations) {
-    }
-
-    /**
-     * What a finished job produced, for polling.
-     */
-    public record Result(long variantId, SolveStatus solveStatus, int unassignedEvents, long penalty, Long bestBound) {
     }
 
     public long saveDraft(Draft draft) {
@@ -82,13 +74,5 @@ public class VariantStore {
             }
         }
         return variant;
-    }
-
-    public Optional<Result> resultOf(long jobId) {
-        return jdbc.query("""
-                select id, solve_status, (metrics ->> 'unassignedEvents')::int, objective, best_bound
-                from slotwise.schedule_variant where solver_job_id = ?
-                """, (rs, row) -> new Result(rs.getLong(1), SolveStatus.valueOf(rs.getString(2)), rs.getInt(3),
-                rs.getLong(4), rs.getObject(5) == null ? null : rs.getLong(5)), jobId).stream().findFirst();
     }
 }

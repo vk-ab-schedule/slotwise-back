@@ -50,6 +50,10 @@ public class SolverJobEntity {
     private SolverJobStatus status;
 
     private Long requestedBy;
+    private boolean incompleteData;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String completedResult;
 
     @CreationTimestamp(source = SourceType.DB)
     @Column(updatable = false)
@@ -61,4 +65,7 @@ public class SolverJobEntity {
 
     @Version
     private Long version;
+
+    record CompletedResult(long variantId, SolveStatus solveStatus, int unassignedEvents, long penalty, Long bestBound) {
+    }
 }

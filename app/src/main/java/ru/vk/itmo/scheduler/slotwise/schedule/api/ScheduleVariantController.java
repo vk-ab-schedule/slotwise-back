@@ -53,7 +53,7 @@ public class ScheduleVariantController {
     @GetMapping(ApiPaths.VARIANTS + "/{id}")
     @Operation(operationId = "getVariant", summary = "Get the complete schedule variant",
             description = "ORGANIZER owner only; inaccessible variants return 404. Returns every assignment, "
-                    + "including UNASSIGNED events, both variant and assignment versions, locks, participant names, "
+                    + "including complete events added after a draft was calculated, as UNASSIGNED. Returns both versions, locks, participant names, "
                     + "resources, commissions, metrics, input provenance and basic explanations. Metrics come from "
                     + "the shared validator, not a solver's self-evaluation. Explanations are limited precheck "
                     + "diagnostics and do not claim a unique cause. Stale data and missing respondents are explicit. "
@@ -87,7 +87,8 @@ public class ScheduleVariantController {
                     + "involving the edited event return 422 HARD_VIOLATIONS with issues and never persist; a malformed "
                     + "assignment returns 422 INVALID_ASSIGNMENT, stale versions 409 STALE_VARIANT_VERSION. dryRun=true "
                     + "returns a preview, metrics and affected account IDs without changing either version. Saving "
-                    + "atomically changes the assignment and variant versions. Locking enforces H9 in later solves; "
+                    + "atomically changes both versions. Remaining hard violations in other assignments are returned in "
+                    + "issues and the draft reports NO_SOLUTION until it is feasible. Locking enforces H9 in later solves; "
                     + "it does not publish. A conflicting lock is never silently removed.")
     public AssignmentUpdateResponse updateAssignment(@PathVariable("id") @Min(1) long id,
                                                      @PathVariable("eventId") @Min(1) long eventId,
@@ -105,7 +106,7 @@ public class ScheduleVariantController {
                     + "superseded variant). Hard violations block publication with 422 HARD_VIOLATIONS, "
                     + "regardless of confirmation flags. confirmUnassigned and confirmStaleData must both be "
                     + "explicitly supplied; each must be true when the corresponding condition exists, otherwise "
-                    + "422 UNASSIGNED_NOT_CONFIRMED or STALE_DATA_NOT_CONFIRMED reports the required confirmation. Unassigned events remain visible to the organizer. "
+                    + "422 UNASSIGNED_NOT_CONFIRMED lists unassigned events and STALE_DATA_NOT_CONFIRMED requests stale-data confirmation. Unassigned events remain visible in the published variant. "
                     + "Repeating publication of the current published variant has no additional effect. "
                     + "Participants see only the current publication; published assignments cannot be edited.")
     public VariantResponse publishVariant(@PathVariable("id") @Min(1) long id,
