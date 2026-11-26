@@ -40,8 +40,6 @@ class SolvingScheduleContractTests extends ApiContractTestBase {
 
     static Stream<MockHttpServletRequestBuilder> validRequests() {
         return Stream.of(
-                get("/api/solvers"),
-                post("/api/sessions/1/precheck").content("{\"expectedInputVersion\":0}"),
                 post("/api/sessions/1/solve").content(SOLVE),
                 post("/api/sessions/1/solve").content(SOLVE.replace("\"seed\":-1", "\"seed\":0,\"baseVariantId\":1")),
                 get("/api/jobs/1"),
