@@ -28,7 +28,7 @@ public record SolverJobResponse(
                 description = "Best solution currently known for this job; null until a solution is found")
         Quality quality,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true, minimum = "1",
-                description = "One-based position while queued; null outside the queue") Integer queuePosition,
+                description = "One-based position in the execution queue, or null when unavailable") Integer queuePosition,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true,
                 description = "Sanitized technical error for FAILED; null for NO_SOLUTION") Failure error,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true,

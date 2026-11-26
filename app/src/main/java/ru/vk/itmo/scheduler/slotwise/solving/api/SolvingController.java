@@ -71,7 +71,9 @@ public class SolvingController {
     public SolverJobResponse solveSession(@PathVariable("id") @Min(1) long id,
                                           @Valid @RequestBody SolveRequest request,
                                           @AuthenticationPrincipal AccountPrincipal organizer) {
-        return solving.solve(id, organizer.getAccountId(), request);
+        long user = organizer.getAccountId();
+        long job = solving.enqueue(id, user, request);
+        return solving.job(job, user);
     }
 
     @GetMapping(ApiPaths.JOBS + "/{id}")

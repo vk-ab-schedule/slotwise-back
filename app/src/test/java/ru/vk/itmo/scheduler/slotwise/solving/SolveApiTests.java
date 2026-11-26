@@ -14,16 +14,22 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import ru.vk.itmo.scheduler.slotwise.ApiTestSupport;
 import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
 import ru.vk.itmo.scheduler.slotwise.domain.solver.SolveResult;
+import ru.vk.itmo.scheduler.slotwise.solving.api.dto.SolveRequest;
 
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,6 +52,10 @@ class SolveApiTests {
     JdbcTemplate jdbc;
     @Autowired
     PasswordEncoder passwordEncoder;
+    @Autowired
+    PlatformTransactionManager transactions;
+    @Autowired
+    SolvingService solving;
     @MockitoSpyBean
     SolverJobRunner runner;
     @MockitoSpyBean
@@ -185,6 +195,122 @@ class SolveApiTests {
         awaitCompletion(active);
         awaitCompletion(queued, secondOrganizer, "COMPLETED");
         solve("GREEDY", 0, null).andExpect(jsonPath("$.id").value(completed));
+    }
+
+    @Test
+    void pollsWhileTheWorkerIsStillUpdatingJobStatus() throws Exception {
+        f.consultation(true);
+        var updatingStatus = new CountDownLatch(1);
+        var finishUpdate = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().startsWith("solver-")) {
+                updatingStatus.countDown();
+                assertThat(finishUpdate.await(15, TimeUnit.SECONDS)).isTrue();
+            }
+            return invocation.callRealMethod();
+        }).when(clock).instant();
+
+        long job = solving.enqueue(f.session, f.organizer, new SolveRequest(0L, SolverAlgorithm.GREEDY, 1, 7L, null));
+        try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+            try {
+                assertThat(updatingStatus.await(10, TimeUnit.SECONDS)).isTrue();
+                var response = callers.submit(() -> poll(job).andExpect(jsonPath("$.status").value("QUEUED")));
+                response.get(5, TimeUnit.SECONDS);
+            } finally {
+                finishUpdate.countDown();
+            }
+        }
+        awaitCompletion(job);
+    }
+
+    @Test
+    void queuePositionsMatchExecutionWhenTransactionsCommitInReverseIdOrder() throws Exception {
+        f.consultation(true);
+        var earlierSession = new SessionFixture(api, jdbc);
+        var laterSession = new SessionFixture(api, jdbc);
+        earlierSession.consultation(true);
+        laterSession.consultation(true);
+        Cookie earlierOwner = api.login(earlierSession.organizer);
+        Cookie laterOwner = api.login(laterSession.organizer);
+        var workerStarted = new CountDownLatch(1);
+        var releaseWorker = new CountDownLatch(1);
+        var commitEarlier = new CountDownLatch(1);
+        var earlierId = new CompletableFuture<Long>();
+        var executionOrder = new LinkedBlockingQueue<Long>();
+
+        doAnswer(invocation -> {
+            SolverJobRunner.Run run = invocation.getArgument(0);
+            if (run.sessionId() == f.session) {
+                workerStarted.countDown();
+                assertThat(releaseWorker.await(15, TimeUnit.SECONDS)).isTrue();
+            } else {
+                executionOrder.add(run.jobId());
+            }
+            return invocation.callRealMethod();
+        }).when(runner).solve(argThat(run -> run != null && (
+                run.sessionId() == f.session || run.sessionId() == earlierSession.session
+                        || run.sessionId() == laterSession.session)));
+
+        long blocker = jobId(solve("GREEDY", 0, null));
+        try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+            try {
+                assertThat(workerStarted.await(10, TimeUnit.SECONDS)).isTrue();
+                var earlier = callers.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                    try {
+                        long id = jobId(solve(earlierSession, earlierOwner, "GREEDY", 0, null, 7)
+                                .andExpect(status().isAccepted()));
+                        earlierId.complete(id);
+                        assertThat(commitEarlier.await(10, TimeUnit.SECONDS)).isTrue();
+                    } catch (Exception e) {
+                        earlierId.completeExceptionally(e);
+                        throw new IllegalStateException(e);
+                    }
+                }));
+                long smallerId = earlierId.get(10, TimeUnit.SECONDS);
+                long largerId = jobId(solve(laterSession, laterOwner, "GREEDY", 0, null, 7)
+                        .andExpect(status().isAccepted())
+                        .andExpect(jsonPath("$.queuePosition").value(1)));
+                assertThat(largerId).isGreaterThan(smallerId);
+                commitEarlier.countDown();
+                earlier.get(10, TimeUnit.SECONDS);
+
+                mvc.perform(get("/api/jobs/" + largerId).cookie(laterOwner))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.queuePosition").value(1));
+                mvc.perform(get("/api/jobs/" + smallerId).cookie(earlierOwner))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.queuePosition").value(2));
+
+                releaseWorker.countDown();
+                assertThat(executionOrder.poll(10, TimeUnit.SECONDS)).isEqualTo(largerId);
+                assertThat(executionOrder.poll(10, TimeUnit.SECONDS)).isEqualTo(smallerId);
+                awaitCompletion(largerId, laterOwner, "COMPLETED");
+                awaitCompletion(smallerId, earlierOwner, "COMPLETED");
+            } finally {
+                commitEarlier.countDown();
+                releaseWorker.countDown();
+            }
+        }
+        awaitCompletion(blocker);
+    }
+
+    @Test
+    void changingEventDurationConflictsWithTheEntireLockedInterval() throws Exception {
+        long event = f.consultation(true);
+        long variant = resultId(awaitCompletion(jobId(solve("GREEDY", 0, null))));
+        jdbc.update("""
+                update slotwise.assignment set starts_at = '2027-01-21T10:00Z', ends_at = '2027-01-21T10:30Z',
+                    locked = true where schedule_variant_id = ?
+                """, variant);
+        jdbc.update("update slotwise.event set duration_minutes = 45 where id = ?", event);
+        jdbc.update("update slotwise.planning_session set input_version = 1 where id = ?", f.session);
+
+        solve("GREEDY", 1, variant).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PINNED_CONFLICT"))
+                .andExpect(jsonPath("$.issues[0].eventIds[0]").value(event));
+        var assignment = jdbc.queryForMap("""
+                select locked, ends_at from slotwise.assignment where schedule_variant_id = ? and event_id = ?
+                """, variant, event);
+        assertThat(assignment).containsEntry("locked", true);
+        assertThat(((Timestamp) assignment.get("ends_at")).toInstant()).isEqualTo(Instant.parse("2027-01-21T10:30:00Z"));
     }
 
     @Test

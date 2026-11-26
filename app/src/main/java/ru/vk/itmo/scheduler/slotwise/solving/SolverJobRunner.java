@@ -27,6 +27,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -57,6 +58,7 @@ public class SolverJobRunner {
     private final Clock clock;
     private final JsonMapper json;
     private final ExecutorService executor;
+    private final ArrayDeque<Run> queue = new ArrayDeque<>();
     private final Map<Long, ProgressListener.Progress> progress = new ConcurrentHashMap<>();
 
     SolverJobRunner(SolverJobRepository jobs, VariantStore variants, PlatformTransactionManager transactions, Clock clock,
@@ -87,9 +89,25 @@ public class SolverJobRunner {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                executor.execute(() -> execute(run));
+                synchronized (queue) {
+                    queue.addLast(run);
+                    executor.execute(SolverJobRunner.this::executeNext);
+                }
             }
         });
+    }
+
+    Integer queuePosition(long jobId) {
+        synchronized (queue) {
+            int position = 1;
+            for (Run run : queue) {
+                if (run.jobId() == jobId) {
+                    return position;
+                }
+                position++;
+            }
+            return null;
+        }
     }
 
     /**
@@ -110,7 +128,11 @@ public class SolverJobRunner {
         executor.shutdownNow();
     }
 
-    private void execute(Run run) {
+    private void executeNext() {
+        Run run;
+        synchronized (queue) {
+            run = queue.removeFirst();
+        }
         try {
             update(run.jobId(), job -> {
                 job.setStatus(SolverJobStatus.RUNNING);

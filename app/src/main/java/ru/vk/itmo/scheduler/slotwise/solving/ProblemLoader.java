@@ -168,12 +168,13 @@ public class ProblemLoader {
         var pinConflicts = new ArrayList<ApiIssue>();
         long slotSeconds = SLOT_MINUTES * 60L;
         jdbc.query("""
-                select event_id, starts_at, room_id, locked from slotwise.assignment
+                select event_id, starts_at, room_id, locked, ends_at from slotwise.assignment
                 where schedule_variant_id = :variant and status = 'ASSIGNED'
                 order by event_id
                 """, params, rs -> {
             long event = rs.getLong(1);
-            var offset = Duration.between(grid.origin(), rs.getTimestamp(2).toInstant());
+            var startsAt = rs.getTimestamp(2).toInstant();
+            var offset = Duration.between(grid.origin(), startsAt);
             long start = offset.getSeconds() / slotSeconds;
             long room = rs.getLong(3);
             boolean locked = rs.getBoolean(4);
@@ -188,6 +189,13 @@ public class ProblemLoader {
                             "Зафиксированное назначение не соответствует текущему периоду или составу сессии",
                             IssueSeverity.ERROR, List.of(event), List.of(), List.of(room)));
                 }
+                return;
+            }
+            if (locked && validateLocks && !startsAt.plusSeconds(problem.event(event).duration() * slotSeconds)
+                    .equals(rs.getTimestamp(5).toInstant())) {
+                pinConflicts.add(new ApiIssue("PINNED_CONFLICT",
+                        "Длительность события изменилась и больше не совпадает с зафиксированным интервалом",
+                        IssueSeverity.ERROR, List.of(event), List.of(), List.of(room)));
                 return;
             }
             var assignment = new Assignment(event, (int) start, room, commission,
