@@ -40,18 +40,13 @@ class SolvingScheduleContractTests extends ApiContractTestBase {
 
     static Stream<MockHttpServletRequestBuilder> validRequests() {
         return Stream.of(
-                get("/api/sessions/1/variants").param("page", "0").param("size", "100"),
-                get("/api/variants/1"),
                 get("/api/variants/1/assignments/2/candidates"),
                 patch("/api/variants/1/assignments/2").content(ASSIGNMENT),
                 patch("/api/variants/1/assignments/2").param("dryRun", "true").content(ASSIGNMENT),
                 patch("/api/variants/1/assignments/2").content("""
                         {"expectedVariantVersion":0,"expectedAssignmentVersion":0,"status":"UNASSIGNED",
                          "startsAt":null,"endsAt":null,"roomId":null,"commissionMembers":[],"locked":false}
-                        """),
-                post("/api/variants/1/publish").content(PUBLISH),
-                get("/api/me/schedule").param("from", "2027-01-01T00:00:00Z")
-                        .param("to", "2027-02-01T00:00:00Z"));
+                        """));
     }
 
     @ParameterizedTest

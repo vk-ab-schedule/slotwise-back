@@ -5,7 +5,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,9 +16,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
+import ru.vk.itmo.scheduler.slotwise.schedule.VariantService;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentCandidate;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentUpdateRequest;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.AssignmentUpdateResponse;
@@ -27,10 +31,12 @@ import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.VariantSummaryResponse;
 import java.util.List;
 
 @RestController
+@RequiredArgsConstructor
 @RequestMapping(produces = "application/json")
 @PreAuthorize("hasRole('ORGANIZER')")
 @Tag(name = "Schedule variants", description = "ORGANIZER: inspect, edit and publish variants of sessions they own")
 public class ScheduleVariantController {
+    private final VariantService variants;
 
     @GetMapping(ApiPaths.SESSIONS + "/{id}/variants")
     @Operation(operationId = "listSessionVariants", summary = "List schedule variants with metrics",
@@ -39,8 +45,9 @@ public class ScheduleVariantController {
                     + "size is 1..100. An empty list is a successful result.")
     public PageResponse<VariantSummaryResponse> listSessionVariants(@PathVariable("id") @Min(1) long id,
                                                                     @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
-                                                                    @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
-        throw ContractStub.notImplemented();
+                                                                    @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size,
+                                                                    @AuthenticationPrincipal AccountPrincipal organizer) {
+        return variants.list(id, organizer.getAccountId(), page, size);
     }
 
     @GetMapping(ApiPaths.VARIANTS + "/{id}")
@@ -51,8 +58,9 @@ public class ScheduleVariantController {
                     + "the shared validator, not a solver's self-evaluation. Explanations are limited precheck "
                     + "diagnostics and do not claim a unique cause. Stale data and missing respondents are explicit. "
                     + "FEASIBLE does not claim optimality; bound and gap are null when unknown.")
-    public VariantResponse getVariant(@PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+    public VariantResponse getVariant(@PathVariable("id") @Min(1) long id,
+                                      @AuthenticationPrincipal AccountPrincipal organizer) {
+        return variants.get(id, organizer.getAccountId());
     }
 
     @GetMapping(ApiPaths.VARIANTS + "/{id}/assignments/{eventId}/candidates")
@@ -90,14 +98,16 @@ public class ScheduleVariantController {
     @Operation(operationId = "publishVariant", summary = "Publish the whole schedule variant",
             description = "ORGANIZER owner only. Publishes the entire validated DRAFT variant atomically and marks "
                     + "the previous publication SUPERSEDED. No subset of assignments can be selected. Checks "
-                    + "expectedVersion (409 on a concurrent edit). Hard violations block publication with 422, "
+                    + "expectedVersion (409 STALE_VARIANT_VERSION on a concurrent edit; 409 VARIANT_NOT_DRAFT for a "
+                    + "superseded variant). Hard violations block publication with 422 HARD_VIOLATIONS, "
                     + "regardless of confirmation flags. confirmUnassigned and confirmStaleData must both be "
                     + "explicitly supplied; each must be true when the corresponding condition exists, otherwise "
-                    + "422 reports the required confirmation. Unassigned events remain visible to the organizer. "
+                    + "422 UNASSIGNED_NOT_CONFIRMED or STALE_DATA_NOT_CONFIRMED reports the required confirmation. Unassigned events remain visible to the organizer. "
                     + "Repeating publication of the current published variant has no additional effect. "
                     + "Participants see only the current publication; published assignments cannot be edited.")
     public VariantResponse publishVariant(@PathVariable("id") @Min(1) long id,
-                                          @Valid @RequestBody PublishVariantRequest request) {
-        throw ContractStub.notImplemented();
+                                          @Valid @RequestBody PublishVariantRequest request,
+                                          @AuthenticationPrincipal AccountPrincipal organizer) {
+        return variants.publish(id, organizer.getAccountId(), request);
     }
 }
