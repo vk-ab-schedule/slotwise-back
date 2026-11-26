@@ -154,10 +154,10 @@ class UniversityContractTests extends ApiContractTestBase {
     @Test
     void nestedImportValidationDoesNotEchoCredentials() throws Exception {
         mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
-                        .content(IMPORT.replace("{bcrypt}$2a$10$contract-secret", "plain-contract-secret")))
+                        .content(IMPORT.replace("teacher@example.org", "invalid-email")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'accounts[1].passwordHash')]").isNotEmpty())
-                .andExpect(content().string(not(containsString("plain-contract-secret"))));
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'accounts[1].email')]").isNotEmpty())
+                .andExpect(content().string(not(containsString("contract-secret"))));
         mvc.perform(post("/api/admin/import").contentType(MediaType.APPLICATION_JSON)
                         .content(IMPORT.replace("\"students\":[\"s-1001\"]", "\"students\":[null]")))
                 .andExpect(status().isBadRequest());
@@ -226,7 +226,9 @@ class UniversityContractTests extends ApiContractTestBase {
         assertEquals(7, properties.size());
         assertTrue(properties.keySet().containsAll(List.of("accounts", "groups", "rooms", "disciplines",
                 "teaching", "supervision", "timetable")));
-        assertEquals(Boolean.TRUE, document.read("$.components.schemas.UniversityImportAccount.properties.passwordHash.writeOnly"));
+        Map<String, Object> passwordHash = document.read("$.components.schemas.UniversityImportAccount.properties.passwordHash");
+        assertEquals(Boolean.TRUE, passwordHash.get("writeOnly"));
+        assertFalse(passwordHash.containsKey("pattern"));
         List<String> required = document.read("$.components.schemas.UniversityImportAccount.required");
         assertFalse(required.contains("passwordHash"));
         List<Map<String, Object>> parameters = document.read("$.paths['/api/admin/import'].post.parameters");

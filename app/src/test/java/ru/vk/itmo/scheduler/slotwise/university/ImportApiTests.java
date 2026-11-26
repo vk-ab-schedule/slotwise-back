@@ -202,7 +202,9 @@ class ImportApiTests {
                   {"externalId":"b4-student","email":"b4-student@example.org","lastName":"Student","firstName":"Test",
                    "role":"STUDENT","timeZone":"Europe/Moscow"},
                   {"externalId":"b4-secret","email":"b4-secret@example.org","lastName":"Secret","firstName":"Test",
-                   "role":"STUDENT","timeZone":"Europe/Moscow","passwordHash":"{unsupported}non-public-test-hash"}],
+                   "role":"STUDENT","timeZone":"Europe/Moscow","passwordHash":"{unsupported}non-public-test-hash"},
+                  {"externalId":"b4-unprefixed","email":"b4-unprefixed@example.org","lastName":"Unprefixed","firstName":"Test",
+                   "role":"STUDENT","timeZone":"Europe/Moscow","passwordHash":"unprefixed-test-hash"}],
                  "groups":[{"externalId":"B4-BAD","students":["b4-secret"]}],
                  "rooms":[],"disciplines":[],"teaching":[],"supervision":[],"timetable":[]}
                 """;
@@ -213,8 +215,11 @@ class ImportApiTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.applied").value(false))
                 .andExpect(jsonPath("$.diagnostics[*].path").value(
-                        contains("accounts[1].passwordHash", "groups[0].students[0]")))
-                .andExpect(content().string(not(containsString("non-public-test-hash"))));
+                        contains("accounts[1].passwordHash", "accounts[2].passwordHash", "groups[0].students[0]")))
+                .andExpect(jsonPath("$.diagnostics[0].issue.code").value("UNSUPPORTED_PASSWORD_HASH"))
+                .andExpect(jsonPath("$.diagnostics[1].issue.code").value("UNSUPPORTED_PASSWORD_HASH"))
+                .andExpect(content().string(not(containsString("non-public-test-hash"))))
+                .andExpect(content().string(not(containsString("unprefixed-test-hash"))));
         assertThat(jdbc.queryForObject("select count(*) from slotwise.account where external_id like 'b4-%'", Long.class))
                 .isZero();
 
@@ -222,7 +227,8 @@ class ImportApiTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.applied").value(true))
                 .andExpect(jsonPath("$.summary.created").value(1))
-                .andExpect(jsonPath("$.summary.rejected").value(2));
+                .andExpect(jsonPath("$.summary.rejected").value(3))
+                .andExpect(jsonPath("$.sections.accounts.rejected").value(2));
         assertThat(jdbc.queryForObject("select count(*) from slotwise.account where external_id like 'b4-%'", Long.class))
                 .isEqualTo(1);
         assertThat(jdbc.queryForObject("select password_hash from slotwise.account where external_id = 'b4-student'", String.class))
