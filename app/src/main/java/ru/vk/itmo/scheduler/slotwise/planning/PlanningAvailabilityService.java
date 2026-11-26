@@ -113,14 +113,8 @@ public class PlanningAvailabilityService {
         var session = session(id, true);
         requireOwner(session, user);
         requireVersion(session, request.expectedVersion());
-        if (status(session) == CollectionStatus.CLOSED) {
-            throw closed();
-        }
-        if (!request.endsAt().isAfter(clock.instant())
-                || !request.endsAt().isAfter(session.getCollectionStartsAt())
-                || !request.endsAt().isBefore(session.getStartsAt())) {
-            throw invalid("INVALID_COLLECTION_DEADLINE", "Дедлайн должен быть после начала сбора, в будущем и до начала сессии");
-        }
+        CollectionWindow.requireEditable(session.getCollectionStatus(), session.getCollectionEndsAt(), clock.instant(),
+                session.getCollectionStartsAt(), request.endsAt(), session.getStartsAt());
         if (!request.endsAt().equals(session.getCollectionEndsAt())) {
             session.setCollectionEndsAt(request.endsAt());
             bump(session);
@@ -271,20 +265,14 @@ public class PlanningAvailabilityService {
     }
 
     private CollectionStatus status(PlanningSessionEntity session) {
-        Instant now = clock.instant();
-        if (session.getCollectionStatus() == CollectionStatus.CLOSED || !now.isBefore(session.getCollectionEndsAt())) {
-            return CollectionStatus.CLOSED;
-        }
-        if (now.isBefore(session.getCollectionStartsAt())) {
-            return CollectionStatus.PENDING;
-        }
-        return CollectionStatus.OPEN;
+        return session.getCollectionStatus().effectiveAt(clock.instant(), session.getCollectionStartsAt(),
+                session.getCollectionEndsAt());
     }
 
     private void requireOpen(PlanningSessionEntity session) {
         var status = status(session);
         if (status == CollectionStatus.CLOSED) {
-            throw closed();
+            throw CollectionWindow.closed();
         }
         if (status != CollectionStatus.OPEN) {
             throw conflict("COLLECTION_NOT_OPEN", "Сбор ещё не начался");
@@ -349,7 +337,4 @@ public class PlanningAvailabilityService {
         return new PlanningException(HttpStatus.CONFLICT, code, message);
     }
 
-    private static PlanningException closed() {
-        return conflict("COLLECTION_CLOSED", "Сбор закрыт; редактирование занятости недоступно");
-    }
 }
