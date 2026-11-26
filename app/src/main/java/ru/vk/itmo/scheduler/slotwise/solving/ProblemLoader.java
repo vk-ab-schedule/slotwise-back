@@ -1,8 +1,13 @@
 package ru.vk.itmo.scheduler.slotwise.solving;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
+import ru.vk.itmo.scheduler.slotwise.common.ApiException;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiIssue;
+import ru.vk.itmo.scheduler.slotwise.common.api.IssueSeverity;
+import ru.vk.itmo.scheduler.slotwise.domain.Assignment;
 import ru.vk.itmo.scheduler.slotwise.domain.CommissionCandidate;
 import ru.vk.itmo.scheduler.slotwise.domain.Dependency;
 import ru.vk.itmo.scheduler.slotwise.domain.Event;
@@ -12,6 +17,7 @@ import ru.vk.itmo.scheduler.slotwise.domain.Room;
 import ru.vk.itmo.scheduler.slotwise.domain.SlotRange;
 import ru.vk.itmo.scheduler.slotwise.domain.TimeGrid;
 import ru.vk.itmo.scheduler.slotwise.domain.Weights;
+import ru.vk.itmo.scheduler.slotwise.domain.validation.ScheduleValidator;
 import ru.vk.itmo.scheduler.slotwise.planning.BusyIntervalNormalizer;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityService;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningSessionEntity;
@@ -30,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -127,6 +134,96 @@ public class ProblemLoader {
                 .weights(new Weights(weights.teacherGaps(), weights.commissionLoadSpread(), weights.undesirableTime(),
                         weights.teacherRoomChanges(), weights.movedEvents()))
                 .build();
+    }
+
+    /**
+     * The problem with a variant of the session as the baseline for S5, its locked assignments pinned (H9).
+     * Outdated assignments are left out when the caller is inspecting or editing an existing variant.
+     */
+    public Problem withBaseline(Problem problem, long variantId) {
+        return withBaseline(problem, variantId, false);
+    }
+
+    Problem withBaseline(Problem problem, long variantId, boolean validateLocks) {
+        var params = Map.of("variant", variantId);
+        var members = new HashMap<Long, List<Long>>();
+        var chairs = new HashMap<Long, Long>();
+        jdbc.query("""
+                select event_id, account_id, chair from slotwise.assignment_commission_member
+                where schedule_variant_id = :variant
+                """, params, rs -> {
+            members.computeIfAbsent(rs.getLong(1), id -> new ArrayList<>()).add(rs.getLong(2));
+            if (rs.getBoolean(3)) {
+                chairs.put(rs.getLong(1), rs.getLong(2));
+            }
+        });
+        Set<Long> events = problem.events().stream().map(Event::id).collect(Collectors.toSet());
+        Set<Long> rooms = problem.rooms().stream().map(Room::id).collect(Collectors.toSet());
+        Set<Long> people = problem.people().stream().map(Person::id).collect(Collectors.toSet());
+        Set<Long> canChair = problem.commissionPool().stream().filter(CommissionCandidate::canChair)
+                .map(CommissionCandidate::personId).collect(Collectors.toSet());
+        var grid = problem.grid();
+        var baseline = new ArrayList<Assignment>();
+        var pinned = new ArrayList<Assignment>();
+        var pinConflicts = new ArrayList<ApiIssue>();
+        long slotSeconds = SLOT_MINUTES * 60L;
+        jdbc.query("""
+                select event_id, starts_at, room_id, locked, ends_at from slotwise.assignment
+                where schedule_variant_id = :variant and status = 'ASSIGNED'
+                order by event_id
+                """, params, rs -> {
+            long event = rs.getLong(1);
+            var startsAt = rs.getTimestamp(2).toInstant();
+            var offset = Duration.between(grid.origin(), startsAt);
+            long start = offset.getSeconds() / slotSeconds;
+            long room = rs.getLong(3);
+            boolean locked = rs.getBoolean(4);
+            var commission = members.getOrDefault(event, List.of());
+            Long chair = chairs.get(event);
+            if (!events.contains(event) || !rooms.contains(room) || !people.containsAll(commission)
+                    || chair != null && !canChair.contains(chair) || offset.isNegative()
+                    || offset.getNano() != 0 || offset.getSeconds() % slotSeconds != 0
+                    || start + problem.event(event).duration() > grid.slotCount()) {
+                if (locked && validateLocks) {
+                    pinConflicts.add(new ApiIssue("PINNED_CONFLICT",
+                            "Зафиксированное назначение не соответствует текущему периоду или составу сессии",
+                            IssueSeverity.ERROR, List.of(event), List.of(), List.of(room)));
+                }
+                return;
+            }
+            if (locked && validateLocks && !startsAt.plusSeconds(problem.event(event).duration() * slotSeconds)
+                    .equals(rs.getTimestamp(5).toInstant())) {
+                pinConflicts.add(new ApiIssue("PINNED_CONFLICT",
+                        "Длительность события изменилась и больше не совпадает с зафиксированным интервалом",
+                        IssueSeverity.ERROR, List.of(event), List.of(), List.of(room)));
+                return;
+            }
+            var assignment = new Assignment(event, (int) start, room, commission,
+                    chair == null ? OptionalLong.empty() : OptionalLong.of(chair));
+            baseline.add(assignment);
+            if (locked) {
+                pinned.add(assignment);
+            }
+        });
+        if (validateLocks && !pinned.isEmpty()) {
+            ScheduleValidator.validate(problem, pinned).violations().forEach(violation ->
+                    pinConflicts.add(new ApiIssue("PINNED_CONFLICT", violation.message(), IssueSeverity.ERROR,
+                            violation.eventIds(), violation.personIds(), violation.roomIds())));
+        }
+        if (!pinConflicts.isEmpty()) {
+            throw new ApiException(HttpStatus.CONFLICT, "PINNED_CONFLICT",
+                    "Проверьте зафиксированные назначения и исправьте конфликт перед запуском расчёта",
+                    Map.of("issues", pinConflicts));
+        }
+        return problem.toBuilder().pinned(pinned).baseline(baseline).build();
+    }
+
+    /** Locks the version row until the caller has loaded the baseline assignments. */
+    Optional<Long> lockVariantVersion(long variantId, long sessionId) {
+        return jdbc.query("""
+                select version from slotwise.schedule_variant
+                where id = :variant and planning_session_id = :session for share
+                """, Map.of("variant", variantId, "session", sessionId), (rs, row) -> rs.getLong(1)).stream().findFirst();
     }
 
     /**

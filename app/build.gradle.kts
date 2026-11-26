@@ -8,6 +8,7 @@ description = "Spring Boot application: API, security, persistence, solver jobs"
 dependencies {
     implementation(project(":domain-model"))
     implementation(project(":solver-greedy"))
+    implementation(project(":solver-cpsat"))
     implementation(project(":datagen"))
 
     implementation("org.springframework.boot:spring-boot-starter-actuator")
