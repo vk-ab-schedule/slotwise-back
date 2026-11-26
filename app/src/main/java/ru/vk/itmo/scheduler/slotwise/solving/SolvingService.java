@@ -93,14 +93,14 @@ public class SolvingService {
      * while the session already has a queued or running job (UX-11).
      */
     @Transactional
-    public SolverJobResponse solve(long sessionId, long user, SolveRequest request) {
+    public long enqueue(long sessionId, long user, SolveRequest request) {
         var session = ownSession(sessionId, user, request.expectedInputVersion(), true);
         if (!SolverJobRunner.available(request.algorithm())) {
             throw new ApiException(HttpStatus.CONFLICT, "SOLVER_UNAVAILABLE", "Этот алгоритм пока недоступен");
         }
         var active = jobs.findFirstByPlanningSessionIdAndStatusIn(sessionId, ACTIVE);
         if (active.isPresent()) {
-            return response(active.get());
+            return active.get().getId();
         }
         Long baseVariantId = request.baseVariantId();
         Long baseVariantVersion = baseVariantId == null ? null : loader.lockVariantVersion(baseVariantId, sessionId)
@@ -112,7 +112,7 @@ public class SolvingService {
         var completed = snapshot.flatMap(value ->
                 jobs.findCompletedRequest(value.getId(), request.algorithm().name(), parametersJson));
         if (completed.isPresent()) {
-            return response(completed.get());
+            return completed.get().getId();
         }
         var input = loader.load(session);
         var problem = baseVariantId == null ? input : loader.withBaseline(input, baseVariantId, true);
@@ -134,7 +134,7 @@ public class SolvingService {
         runner.submitAfterCommit(new SolverJobRunner.Run(job.getId(), sessionId, snapshotId,
                 baseVariantId, request.algorithm(), problem,
                 new SolveParams(Duration.ofSeconds(request.timeLimitSeconds()), request.seed())));
-        return response(job);
+        return job.getId();
     }
 
     public SolverJobResponse job(long id, long user) {
@@ -159,8 +159,7 @@ public class SolvingService {
         Long resultId = null;
         SolveStatus solveStatus = null;
         switch (job.getStatus()) {
-            case QUEUED -> queuePosition = Math.toIntExact(
-                    jobs.countByStatusAndIdLessThan(SolverJobStatus.QUEUED, job.getId()) + 1);
+            case QUEUED -> queuePosition = runner.queuePosition(job.getId());
             case RUNNING -> {
                 long elapsedMillis = Duration.between(job.getStartedAt(), clock.instant()).toMillis();
                 long limitMillis = Duration.ofSeconds(parameters.timeLimitSeconds()).toMillis();

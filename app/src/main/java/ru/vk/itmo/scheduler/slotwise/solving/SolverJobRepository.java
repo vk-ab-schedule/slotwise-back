@@ -22,6 +22,4 @@ public interface SolverJobRepository extends JpaRepository<SolverJobEntity, Long
     Optional<SolverJobEntity> findFirstByPlanningSessionIdAndStatusIn(long sessionId, Collection<SolverJobStatus> statuses);
 
     List<SolverJobEntity> findByStatusIn(Collection<SolverJobStatus> statuses);
-
-    long countByStatusAndIdLessThan(SolverJobStatus status, long id);
 }
