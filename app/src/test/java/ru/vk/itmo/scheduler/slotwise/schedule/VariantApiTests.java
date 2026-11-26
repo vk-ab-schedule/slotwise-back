@@ -20,6 +20,7 @@ import ru.vk.itmo.scheduler.slotwise.solving.SessionFixture;
 import java.time.Clock;
 import java.time.Instant;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.mockito.Mockito.doReturn;
@@ -260,6 +261,45 @@ class VariantApiTests {
         mySchedule(api.login(f.student))
                 .andExpect(jsonPath("$.events[0].commissionMembers[0].accountId").value(secondChair))
                 .andExpect(jsonPath("$.events[0].changed").value(true));
+    }
+
+    @Test
+    void showsEventsAddedAfterCalculationBeforeAndAfterPublishingTheStaleDraft() throws Exception {
+        f.consultation(true);
+        long variant = f.draft(mvc, api, organizer, 1);
+        long added = f.consultation(true);
+        changeInput();
+        String newAssignment = "$.assignments[?(@.eventId == " + added + ")]";
+
+        mvc.perform(get(f.path("variants")).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(variant))
+                .andExpect(jsonPath("$.items[0].version").value(0))
+                .andExpect(jsonPath("$.items[0].metrics.unassignedEvents").value(1));
+        mvc.perform(get("/api/variants/" + variant).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(1))
+                .andExpect(jsonPath(newAssignment + ".status", contains("UNASSIGNED")));
+        publish(variant, 0, false, true).andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("UNASSIGNED_NOT_CONFIRMED"))
+                .andExpect(jsonPath("$.issues[0].eventIds[0]").value(added));
+        assertThat(jdbc.queryForObject("""
+                select count(*) from slotwise.assignment where schedule_variant_id = ? and event_id = ?
+                """, Integer.class, variant, added)).isZero();
+
+        publish(variant, 0, true, true).andExpect(status().isOk())
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(1))
+                .andExpect(jsonPath(newAssignment + ".status", contains("UNASSIGNED")));
+        long later = f.consultation(true);
+        changeInput();
+        publish(variant, 0, true, true).andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value(1))
+                .andExpect(jsonPath("$.assignments[?(@.eventId == " + later + ")]").isEmpty());
+        mvc.perform(get("/api/variants/" + variant).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(1))
+                .andExpect(jsonPath(newAssignment + ".status", contains("UNASSIGNED")));
+        mySchedule(api.login(f.student)).andExpect(jsonPath("$.events.length()").value(1));
     }
 
     private long commissionMember() {

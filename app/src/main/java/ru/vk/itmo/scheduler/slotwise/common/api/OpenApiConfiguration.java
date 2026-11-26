@@ -78,6 +78,7 @@ public class OpenApiConfiguration {
             "solveSession",
             "submitMyBusyCalendar",
             "updateAccount",
+            "updateAssignment",
             "updateSession",
             "updateSessionEvent");
 
