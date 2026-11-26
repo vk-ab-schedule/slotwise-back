@@ -19,6 +19,8 @@ import ru.vk.itmo.scheduler.slotwise.solving.SessionFixture;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -102,16 +104,14 @@ class VariantApiTests {
     @Test
     void participantsAndCommissionMembersSeeTheCurrentPublicationWithChangedEvents() throws Exception {
         long consultation = f.consultation(true);
-        long member = api.account("TEACHER");
-        jdbc.update("insert into slotwise.session_participant(planning_session_id, account_id) values (?, ?)", f.session, member);
-        jdbc.update("insert into slotwise.commission_candidate values (?, ?, true)", f.session, member);
+        long member = commissionMember();
+        jdbc.update("update slotwise.event set commission_size = 1, requires_chair = true where id = ?", consultation);
         long first = f.draft(mvc, api, organizer, 1);
+        atFixedTime(first, 30);
         publish(first, 0, false, false).andExpect(status().isOk());
         long second = f.draft(mvc, api, organizer, 2);
         jdbc.update("update slotwise.assignment set starts_at = '2027-01-22T15:00Z', ends_at = '2027-01-22T15:30Z' "
                 + "where schedule_variant_id = ?", second);
-        jdbc.update("insert into slotwise.assignment_commission_member values (?, ?, ?, ?, true)",
-                f.session, second, consultation, member);
 
         mySchedule(api.login(f.student)).andExpect(jsonPath("$.events[0].variantId").value(first));
         publish(second, 0, false, false).andExpect(status().isOk());
@@ -129,6 +129,128 @@ class VariantApiTests {
                 .andExpect(jsonPath("$.events[0].eventId").value(consultation))
                 .andExpect(jsonPath("$.events[0].commissionMembers[0].chair").value(true));
         mySchedule(api.login(f.otherStudent)).andExpect(jsonPath("$.events.length()").value(0));
+    }
+
+    @Test
+    void staleConfirmationCannotOverrideNewHardViolations() throws Exception {
+        f.consultation(true);
+        long variant = f.draft(mvc, api, organizer, 1);
+        String start = jdbc.queryForObject("select starts_at::text from slotwise.assignment where schedule_variant_id = ?",
+                String.class, variant);
+        String end = jdbc.queryForObject("select ends_at::text from slotwise.assignment where schedule_variant_id = ?",
+                String.class, variant);
+        f.classes(f.student, start, end);
+        changeInput();
+
+        publish(variant, 0, true, true).andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("HARD_VIOLATIONS"))
+                .andExpect(jsonPath("$.issues").isNotEmpty());
+        mvc.perform(get("/api/variants/" + variant).cookie(organizer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DRAFT"))
+                .andExpect(jsonPath("$.version").value(0));
+    }
+
+    @Test
+    void editingAPlanningEventDoesNotChangeThePublishedPersonalSchedule() throws Exception {
+        long event = f.consultation(true);
+        long variant = f.draft(mvc, api, organizer, 1);
+        publish(variant, 0, false, false).andExpect(status().isOk());
+        var before = mySchedule(api.login(f.student)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        mvc.perform(put(f.path("events/" + event)).cookie(organizer).with(api.xsrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                {"expectedVersion":0,"title":"Новый заголовок","durationMinutes":30,"format":"ONLINE",
+                                 "preparationDays":0,"commissionSize":0,"requiresChair":false,"equipmentIds":[],
+                                 "participants":[{"accountId":%d,"role":"STUDENT"},{"accountId":%d,"role":"SUPERVISOR"}],
+                                 "dependencies":[]}
+                                """.formatted(f.otherStudent, f.teacher)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Новый заголовок"));
+
+        mySchedule(api.login(f.otherStudent)).andExpect(status().isOk()).andExpect(jsonPath("$.events").isEmpty());
+        mySchedule(api.login(f.student)).andExpect(status().isOk())
+                .andExpect(content().json(before));
+        mvc.perform(get("/api/variants/" + variant).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignments[0].title").value("Консультация с научным руководителем"));
+    }
+
+    @Test
+    void marksANewPlacementAfterAPublicationWithOnlyUnassignedEvents() throws Exception {
+        long event = f.consultation(true);
+        f.needsEquipment(event, "Проектор");
+        long first = f.draft(mvc, api, organizer, 1);
+        publish(first, 0, true, false).andExpect(status().isOk());
+        mySchedule(api.login(f.student)).andExpect(jsonPath("$.events").isEmpty());
+
+        jdbc.update("delete from slotwise.event_equipment where event_id = ?", event);
+        changeInput();
+        long second = f.draft(mvc, api, organizer, 2);
+        publish(second, 0, false, false).andExpect(status().isOk());
+        mySchedule(api.login(f.student)).andExpect(jsonPath("$.events[0].changed").value(true));
+    }
+
+    @Test
+    void marksAnEndTimeChangeEvenWhenTheAssignmentStartsInTheSameSlot() throws Exception {
+        long event = f.consultation(true);
+        long first = f.draft(mvc, api, organizer, 1);
+        atFixedTime(first, 30);
+        publish(first, 0, false, false).andExpect(status().isOk());
+        mySchedule(api.login(f.student)).andExpect(jsonPath("$.events[0].changed").value(false));
+
+        jdbc.update("update slotwise.event set duration_minutes = 35 where id = ?", event);
+        changeInput();
+        long second = f.draft(mvc, api, organizer, 2);
+        atFixedTime(second, 35);
+        publish(second, 0, false, false).andExpect(status().isOk());
+        mySchedule(api.login(f.student))
+                .andExpect(jsonPath("$.events[0].startsAt").value("2027-01-22T14:00:00Z"))
+                .andExpect(jsonPath("$.events[0].endsAt").value("2027-01-22T14:35:00Z"))
+                .andExpect(jsonPath("$.events[0].changed").value(true));
+    }
+
+    @Test
+    void marksAChairChangeWithTheSameCommissionMembers() throws Exception {
+        long event = f.consultation(true);
+        long firstChair = commissionMember();
+        long secondChair = commissionMember();
+        jdbc.update("update slotwise.event set commission_size = 2, requires_chair = true where id = ?", event);
+        long first = f.draft(mvc, api, organizer, 1);
+        atFixedTime(first, 30);
+        chair(first, firstChair);
+        publish(first, 0, false, false).andExpect(status().isOk());
+
+        long second = f.draft(mvc, api, organizer, 2);
+        atFixedTime(second, 30);
+        chair(second, secondChair);
+        publish(second, 0, false, false).andExpect(status().isOk());
+        mySchedule(api.login(f.student))
+                .andExpect(jsonPath("$.events[0].commissionMembers[0].accountId").value(secondChair))
+                .andExpect(jsonPath("$.events[0].changed").value(true));
+    }
+
+    private long commissionMember() {
+        long member = api.account("TEACHER");
+        jdbc.update("insert into slotwise.session_participant(planning_session_id, account_id) values (?, ?)", f.session, member);
+        jdbc.update("insert into slotwise.commission_candidate values (?, ?, true)", f.session, member);
+        return member;
+    }
+
+    private void changeInput() {
+        jdbc.update("update slotwise.planning_session set input_version = input_version + 1 where id = ?", f.session);
+    }
+
+    private void atFixedTime(long variant, int minutes) {
+        jdbc.update("""
+                update slotwise.assignment set starts_at = '2027-01-22T14:00Z',
+                    ends_at = '2027-01-22T14:00Z'::timestamptz + ? * interval '1 minute'
+                where schedule_variant_id = ?
+                """, minutes, variant);
+    }
+
+    private void chair(long variant, long id) {
+        jdbc.update("update slotwise.assignment_commission_member set chair = account_id = ? where schedule_variant_id = ?",
+                id, variant);
     }
 
     private ResultActions publish(long variant, long version, boolean unassigned, boolean stale) throws Exception {
