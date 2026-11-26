@@ -232,6 +232,16 @@ class UniversityContractTests extends ApiContractTestBase {
     }
 
     @Test
+    void openApiDocumentsInvalidTimetableRange() throws Exception {
+        DocumentContext document = specification();
+        String response = "$.paths['/api/university/timetable'].get.responses['400']";
+        String description = document.read(response + ".description");
+        assertTrue(description.contains("INVALID_TIMETABLE_RANGE when startsAt >= endsAt"));
+        assertEquals("#/components/schemas/ApiProblem",
+                document.read(response + ".content['application/problem+json'].schema['$ref']"));
+    }
+
+    @Test
     void openApiCatalogsExposePaginationDefaultsAndBounds() throws Exception {
         DocumentContext document = specification();
         for (String path : catalogPaths().toList()) {

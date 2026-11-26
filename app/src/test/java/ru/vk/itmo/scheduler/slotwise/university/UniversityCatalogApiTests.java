@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -18,6 +19,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -139,9 +141,15 @@ class UniversityCatalogApiTests {
                 .andExpect(jsonPath("$.items[0].roomId").value(nullValue()));
         mvc.perform(catalog("timetable").param("roomId", "42001").param("endsAt", "2027-06-15T10:00:00Z"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
-        mvc.perform(catalog("timetable").param("startsAt", "2027-06-15T10:00:00Z")
-                        .param("endsAt", "2027-06-15T10:00:00Z"))
-                .andExpect(status().isBadRequest());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2027-06-15T09:00:00Z", "2027-06-15T10:00:00Z"})
+    void timetableRejectsAnEmptyOrReversedRangeWithProblemDetails(String endsAt) throws Exception {
+        mvc.perform(catalog("timetable").param("startsAt", "2027-06-15T10:00:00Z").param("endsAt", endsAt))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE_RANGE"));
     }
 
     @Test

@@ -115,6 +115,11 @@ public class OpenApiConfiguration {
             if (handler.getBeanType() == UniversityCatalogController.class) {
                 operation.getResponses().remove("501");
             }
+            if ("listUniversityTimetable".equals(operation.getOperationId())) {
+                operation.getResponses().addApiResponse("400", problemResponse(
+                        "Returns INVALID_TIMETABLE_RANGE when startsAt >= endsAt. Malformed date parameters "
+                                + "return INVALID_REQUEST."));
+            }
             if ("getPersonalSchedule".equals(operation.getOperationId())) {
                 operation.getResponses().addApiResponse("400", problemResponse(
                         "Returns INVALID_SCHEDULE_RANGE when from >= to. Missing or malformed date parameters "
