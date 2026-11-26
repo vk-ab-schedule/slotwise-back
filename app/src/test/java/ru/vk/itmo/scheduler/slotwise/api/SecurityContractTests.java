@@ -41,7 +41,7 @@ class SecurityContractTests extends ApiContractTestBase {
                 "reviewer", null, AuthorityUtils.createAuthorityList("ROLE_ADMIN")));
         session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, securityContext);
 
-        client.perform(get("/api/sessions").session(session)).andExpect(status().isNotImplemented());
+        client.perform(get("/api/sessions").session(session)).andExpect(status().isOk());
         client.perform(post("/api/auth/logout").session(session).with(csrf()))
                 .andExpect(status().isNoContent()).andExpect(content().string(""));
         assertTrue(session.isInvalid(), "Logout must invalidate the authenticated server session");
