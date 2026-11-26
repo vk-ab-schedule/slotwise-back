@@ -20,6 +20,7 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRepository;
 import ru.vk.itmo.scheduler.slotwise.university.ImportService;
+import ru.vk.itmo.scheduler.slotwise.university.UniversityCatalogService;
 import ru.vk.itmo.scheduler.slotwise.account.AccountService;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -56,6 +57,8 @@ public abstract class ApiContractTestBase {
     @Autowired
     private WebApplicationContext context;
     protected MockMvc mvc;
+    @MockitoBean
+    private UniversityCatalogService universityCatalog;
 
     @BeforeEach
     void authenticatedContractClient() {
