@@ -17,6 +17,7 @@ import ru.vk.itmo.scheduler.slotwise.planning.api.dto.PlanningSessionResponse;
 import ru.vk.itmo.scheduler.slotwise.planning.api.dto.SessionSelection;
 import ru.vk.itmo.scheduler.slotwise.planning.api.dto.UpdatePlanningSessionRequest;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
@@ -30,6 +31,7 @@ public class SessionPreparationService {
     private static final Duration SLOT = Duration.ofMinutes(SLOT_MINUTES);
     private final SessionPreparationStore sessions;
     private final SessionMembership membership;
+    private final Clock clock;
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResponse<PlanningSessionResponse> list(AccountPrincipal user, int page, int size) {
@@ -56,6 +58,13 @@ public class SessionPreparationService {
         var settings = new Settings(request.name().strip(), request.startsAt(), request.endsAt(), request.timeZone(),
                 request.workingDays(), request.workingDayStart(), request.workingDayEnd(), request.collectionStartsAt(),
                 request.collectionEndsAt());
+        var current = sessions.get(id);
+        var collectionStart = settings.collectionStart().truncatedTo(ChronoUnit.MICROS);
+        var collectionEnd = settings.collectionEnd().truncatedTo(ChronoUnit.MICROS);
+        if (!collectionStart.equals(current.collectionStartsAt()) || !collectionEnd.equals(current.collectionEndsAt())) {
+            CollectionWindow.requireEditable(current.collectionStatus(), current.collectionEndsAt(), clock.instant(),
+                    collectionStart, collectionEnd, settings.startsAt().truncatedTo(ChronoUnit.MICROS));
+        }
         validate(settings);
         try {
             sessions.update(id, settings);

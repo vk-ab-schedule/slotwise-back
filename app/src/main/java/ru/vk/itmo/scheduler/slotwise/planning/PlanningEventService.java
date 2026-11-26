@@ -125,7 +125,8 @@ public class PlanningEventService {
                 issues.add(issue("MISSING_SUPERVISOR", "Не найден научный руководитель", event, missingSupervisors));
             }
         }
-        events.addTemplateEdges(id, created);
+        events.syncTemplateEdges(id, created);
+        events.requireAcyclic(id);
         var revision = sessions.bump(id);
         return new CreateEventsResponse(events.get(id, created), issues, revision.version(), revision.inputVersion());
     }
@@ -140,6 +141,10 @@ public class PlanningEventService {
             if (!accounts.add(person.accountId())) {
                 throw invalid("DUPLICATE_EVENT_PARTICIPANT", "Участник события указан дважды");
             }
+        }
+        var students = studentIds(request.participants());
+        if (existing.granularity() == EventGranularity.PER_STUDENT && students.size() > 1) {
+            throw invalid("TOO_MANY_EVENT_STUDENTS", "В индивидуальном событии может быть только один студент");
         }
         var roles = people.activeRoles(accounts);
         for (var person : request.participants()) {
@@ -166,7 +171,17 @@ public class PlanningEventService {
             events.writeParticipants(id, event, request.participants());
             membership.reconcile(id);
         }
-        events.update(id, event, request, complete, dependenciesChanged);
+        events.update(id, event, request, complete);
+        if (dependenciesChanged) {
+            events.editDependencies(id, event, existing.dependencies(), request.dependencies());
+        }
+        boolean studentsChanged = !students.equals(studentIds(existing.participants()));
+        if (studentsChanged) {
+            events.syncTemplateEdges(id, List.of(event));
+        }
+        if (dependenciesChanged || studentsChanged) {
+            events.requireAcyclic(id);
+        }
         sessions.bump(id);
         return events.get(id, event);
     }
@@ -178,6 +193,16 @@ public class PlanningEventService {
         events.delete(id, event);
         membership.reconcile(id);
         sessions.bump(id);
+    }
+
+    private static Set<Long> studentIds(List<EventParticipant> participants) {
+        var ids = new HashSet<Long>();
+        for (var person : participants) {
+            if (person.role() == ParticipantRole.STUDENT) {
+                ids.add(person.accountId());
+            }
+        }
+        return ids;
     }
 
     private boolean completeAfterEdit(EventResponse event, List<EventParticipant> participants) {

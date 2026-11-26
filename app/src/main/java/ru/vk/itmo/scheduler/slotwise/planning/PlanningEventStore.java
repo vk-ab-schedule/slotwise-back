@@ -19,6 +19,7 @@ import java.sql.SQLException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -112,23 +113,19 @@ class PlanningEventStore {
         return event;
     }
 
-    void update(long id, long event, UpdateEventRequest request, boolean complete, boolean dependenciesChanged) {
+    void update(long id, long event, UpdateEventRequest request, boolean complete) {
         jdbc.sql("""
                 update slotwise.event set title=:title,description=:description,duration_minutes=:duration,format=:format,
                     preparation_days=:preparation,commission_size=:commission,requires_chair=:chair,complete=:complete,
-                    use_template_dependencies=use_template_dependencies and not :dependenciesChanged,version=version+1
+                    version=version+1
                 where planning_session_id=:id and id=:event
                 """).param("id", id).param("event", event).param("title", request.title().strip())
                 .param("description", request.description()).param("duration", request.durationMinutes())
                 .param("format", request.format().name()).param("preparation", request.preparationDays())
                 .param("commission", request.commissionSize()).param("chair", request.requiresChair())
-                .param("complete", complete).param("dependenciesChanged", dependenciesChanged).update();
+                .param("complete", complete).update();
         jdbc.sql("delete from slotwise.event_equipment where event_id=:event").param("event", event).update();
         writeEquipment(event, request.equipmentIds());
-        if (dependenciesChanged) {
-            replaceDependencies(id, event, request.dependencies());
-            requireAcyclic(id);
-        }
     }
 
     void writeParticipants(long id, long event, List<EventParticipant> participants) {
@@ -152,27 +149,39 @@ class PlanningEventStore {
                 """).param("event", event).query(String.class).list().stream().map(ParticipantRole::valueOf).toList();
     }
 
-    void addTemplateEdges(long session, List<Long> created) {
+    void syncTemplateEdges(long session, List<Long> changed) {
         jdbc.sql("""
-                with added as (
-                    insert into slotwise.event_dependency
-                        (planning_session_id,predecessor_event_id,successor_event_id,min_gap_days,max_gap_days)
-                    select :id,p.id,s.id,d.min_gap_days,d.max_gap_days
+                with wanted as (
+                    select p.id as predecessor, s.id as successor, d.min_gap_days, d.max_gap_days
                     from slotwise.event_template_dependency d join slotwise.event s on s.id=d.event_id
                     join slotwise.event p on p.planning_session_id=s.planning_session_id and p.event_type_id=d.predecessor_type_id
                     where s.planning_session_id=:id and s.use_template_dependencies
-                      and (s.id in (:created) or p.id in (:created))
+                      and (s.id in (:changed) or p.id in (:changed))
                       and (s.discipline_id is null or p.discipline_id is null or s.discipline_id=p.discipline_id)
                       and exists (
                         select from slotwise.event_participant sp join slotwise.event_participant pp
                             on sp.account_id=pp.account_id and pp.event_id=p.id and pp.participant_role='STUDENT'
                         where sp.event_id=s.id and sp.participant_role='STUDENT')
+                      and not exists (
+                        select from slotwise.event_dependency_exclusion x
+                        where x.predecessor_event_id=p.id and x.successor_event_id=s.id)
+                ), removed as (
+                    delete from slotwise.event_dependency d
+                    where d.planning_session_id=:id and d.automatic
+                      and (d.predecessor_event_id in (:changed) or d.successor_event_id in (:changed))
+                      and not exists (select from wanted w
+                          where w.predecessor=d.predecessor_event_id and w.successor=d.successor_event_id)
+                    returning successor_event_id
+                ), added as (
+                    insert into slotwise.event_dependency
+                        (planning_session_id,predecessor_event_id,successor_event_id,min_gap_days,max_gap_days,automatic)
+                    select :id,predecessor,successor,min_gap_days,max_gap_days,true from wanted
                     on conflict do nothing returning successor_event_id
                 )
                 update slotwise.event set version=version+1
-                where id in (select successor_event_id from added) and id not in (:created)
-                """).param("id", session).param("created", created).update();
-        requireAcyclic(session);
+                where id in (select successor_event_id from removed union select successor_event_id from added)
+                  and id not in (:changed)
+                """).param("id", session).param("changed", changed).update();
     }
 
     void delete(long id, long event) {
@@ -210,19 +219,40 @@ class PlanningEventStore {
         }
     }
 
-    private void replaceDependencies(long id, long event, List<EventPredecessor> dependencies) {
-        jdbc.sql("delete from slotwise.event_dependency where successor_event_id=:event").param("event", event).update();
-        for (var dependency : dependencies) {
+    void editDependencies(long id, long event, List<EventPredecessor> current, List<EventPredecessor> requested) {
+        var requestedIds = new HashSet<Long>();
+        for (var dependency : requested) {
+            requestedIds.add(dependency.predecessorEventId());
+        }
+        for (var dependency : current) {
+            long predecessor = dependency.predecessorEventId();
+            if (!requestedIds.contains(predecessor)) {
+                jdbc.sql("""
+                        insert into slotwise.event_dependency_exclusion (predecessor_event_id,successor_event_id)
+                        values (:predecessor,:event) on conflict do nothing
+                        """).param("predecessor", predecessor).param("event", event).update();
+                jdbc.sql("""
+                        delete from slotwise.event_dependency where predecessor_event_id=:predecessor and successor_event_id=:event
+                        """).param("predecessor", predecessor).param("event", event).update();
+            }
+        }
+        var unchanged = Set.copyOf(current);
+        for (var dependency : requested) {
+            if (unchanged.contains(dependency)) {
+                continue;
+            }
             jdbc.sql("""
                     insert into slotwise.event_dependency
-                        (planning_session_id,predecessor_event_id,successor_event_id,min_gap_days,max_gap_days)
-                    values (:id,:predecessor,:event,:min,:max)
+                        (planning_session_id,predecessor_event_id,successor_event_id,min_gap_days,max_gap_days,automatic)
+                    values (:id,:predecessor,:event,:min,:max,false)
+                    on conflict (predecessor_event_id,successor_event_id)
+                    do update set min_gap_days=excluded.min_gap_days,max_gap_days=excluded.max_gap_days,automatic=false
                     """).param("id", id).param("event", event).param("predecessor", dependency.predecessorEventId())
                     .param("min", dependency.minGapDays()).param("max", dependency.maxGapDays()).update();
         }
     }
 
-    private void requireAcyclic(long session) {
+    void requireAcyclic(long session) {
         var successors = new HashMap<Long, List<Long>>();
         var incoming = new HashMap<Long, Integer>();
         jdbc.sql("""

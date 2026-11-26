@@ -14,9 +14,15 @@ import org.springframework.test.web.servlet.ResultActions;
 import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRole;
 import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
+import ru.vk.itmo.scheduler.slotwise.eventtype.ParticipantRole;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.EventParticipant;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.EventPredecessor;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.EventResponse;
+import ru.vk.itmo.scheduler.slotwise.planning.api.dto.UpdateEventRequest;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -196,6 +202,91 @@ class SessionPreparationApiTests {
                 .andExpect(status().is(422)).andExpect(jsonPath("$.code").value("NO_WORKING_TIME"));
     }
 
+    @Test
+    void cannotReopenAnExpiredCollectionButCanRenameTheSession() throws Exception {
+        long owner = account(AccountRole.ORGANIZER);
+        var auth = authentication(actor(owner, AccountRole.ORGANIZER));
+        String expired = SESSION.replace("2027-04-01T09:00:00Z", "2020-04-01T09:00:00Z")
+                .replace("2027-04-05T08:00:00Z", "2020-04-05T08:00:00Z");
+        long session = body(mvc.perform(post("/api/sessions").with(csrf()).with(auth)
+                        .contentType(MediaType.APPLICATION_JSON).content(expired))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.collectionStatus").value("CLOSED"))).get("id").asLong();
+
+        String reopen = SESSION.replace("{", "{\"expectedVersion\":0,");
+        mvc.perform(patch("/api/sessions/{id}", session).with(csrf()).with(auth)
+                        .contentType(MediaType.APPLICATION_JSON).content(reopen))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("COLLECTION_CLOSED"));
+        mvc.perform(patch("/api/sessions/{id}/collection", session).with(csrf()).with(auth)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0,\"endsAt\":\"2027-04-05T08:00:00Z\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("COLLECTION_CLOSED"));
+
+        String rename = expired.replace("{", "{\"expectedVersion\":0,").replace("Планирование B13", "Новое название");
+        mvc.perform(patch("/api/sessions/{id}", session).with(csrf()).with(auth)
+                        .contentType(MediaType.APPLICATION_JSON).content(rename))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Новое название"))
+                .andExpect(jsonPath("$.collectionStatus").value("CLOSED"))
+                .andExpect(jsonPath("$.collectionEndsAt").value("2020-04-05T08:00:00Z"))
+                .andExpect(jsonPath("$.version").value(1));
+    }
+
+    @Test
+    void movesOnlyAutomaticDependenciesWhenStudentsChange() throws Exception {
+        var f = fixture();
+        long session = newSession(f.owner());
+        var predefenses = body(createEvents(f, session, 0, type("Предзащита"), List.of(f.group()), List.of())).get("events");
+        var predecessorA = json.treeToValue(predefenses.get(0), EventResponse.class);
+        var predecessorB = json.treeToValue(predefenses.get(1), EventResponse.class);
+        long manual = body(createEvents(f, session, 1, type("Консультация с научным руководителем"), List.of(),
+                List.of(f.student()))).get("events").get(0).get("id").asLong();
+        var defense = json.treeToValue(body(createEvents(f, session, 2, type("Защита"), List.of(),
+                List.of(f.student()))).get("events").get(0), EventResponse.class);
+        var explicit = new EventPredecessor(manual, 0, null);
+        var withManual = json.treeToValue(body(updateEvent(f, defense, defense.participants(),
+                List.of(defense.dependencies().getFirst(), explicit)).andExpect(status().isOk())), EventResponse.class);
+
+        var studentB = new EventParticipant(f.otherStudent(), ParticipantRole.STUDENT);
+        var afterSwap = json.treeToValue(body(updateEvent(f, withManual, List.of(studentB), withManual.dependencies())
+                .andExpect(status().isOk())), EventResponse.class);
+        assertThat(afterSwap.dependencies()).containsExactlyInAnyOrder(new EventPredecessor(predecessorB.id(), 3, null), explicit);
+        assertThat(afterSwap.dependencies()).noneMatch(d -> d.predecessorEventId() == predecessorA.id());
+
+        var studentA = new EventParticipant(f.student(), ParticipantRole.STUDENT);
+        updateEvent(f, predecessorB, List.of(studentA), predecessorB.dependencies()).andExpect(status().isOk());
+        var updatedSuccessor = json.treeToValue(body(mvc.perform(get("/api/sessions/{id}/events/{event}", session, defense.id())
+                        .with(authentication(actor(f.owner(), AccountRole.ORGANIZER))))
+                .andExpect(status().isOk())), EventResponse.class);
+        assertThat(updatedSuccessor.dependencies()).containsExactly(explicit);
+        assertThat(updatedSuccessor.version()).isEqualTo(afterSwap.version() + 1);
+    }
+
+    @Test
+    void rejectsASecondStudentWhenUpdatingAnIndividualEvent() throws Exception {
+        var f = fixture();
+        long session = newSession(f.owner());
+        var event = json.treeToValue(body(createEvents(f, session, 0, type("Защита"), List.of(),
+                List.of(f.student()))).get("events").get(0), EventResponse.class);
+        var participants = new ArrayList<>(event.participants());
+        participants.add(new EventParticipant(f.otherStudent(), ParticipantRole.STUDENT));
+        updateEvent(f, event, participants, event.dependencies()).andExpect(status().is(422))
+                .andExpect(jsonPath("$.code").value("TOO_MANY_EVENT_STUDENTS"));
+
+        mvc.perform(get("/api/sessions/{id}/events/{event}", session, event.id())
+                        .with(authentication(actor(f.owner(), AccountRole.ORGANIZER))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.participants.length()").value(2))
+                .andExpect(jsonPath("$.version").value(event.version()));
+    }
+
+    private ResultActions updateEvent(Fixture f, EventResponse event, List<EventParticipant> participants,
+                                      List<EventPredecessor> dependencies) throws Exception {
+        var request = new UpdateEventRequest(event.version(), event.title(), event.description(), event.durationMinutes(),
+                event.format(), event.preparationDays(), event.commissionSize(), event.requiresChair(), participants,
+                event.equipmentIds(), dependencies);
+        return mvc.perform(put("/api/sessions/{id}/events/{event}", event.sessionId(), event.id()).with(csrf())
+                .with(authentication(actor(f.owner(), AccountRole.ORGANIZER)))
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(request)));
+    }
+
     private long newSession(long owner) throws Exception {
         return body(mvc.perform(post("/api/sessions").with(csrf()).with(authentication(actor(owner, AccountRole.ORGANIZER)))
                         .contentType(MediaType.APPLICATION_JSON).content(SESSION))
@@ -242,7 +333,7 @@ class SessionPreparationApiTests {
         jdbc.update("insert into slotwise.study_group_member values (?,?),(?,?)", group, student, group, otherStudent);
         jdbc.update("insert into slotwise.supervision values (?,?)", student, teacher);
         jdbc.update("insert into slotwise.teaching(teacher_id,discipline_id,study_group_id) values (?,?,?)", teacher, discipline, group);
-        return new Fixture(owner, student, teacher, group, room, discipline);
+        return new Fixture(owner, student, otherStudent, teacher, group, room, discipline);
     }
 
     private long account(AccountRole role) {
@@ -260,6 +351,6 @@ class SessionPreparationApiTests {
                 AuthorityUtils.createAuthorityList("ROLE_" + role.name()));
     }
 
-    private record Fixture(long owner, long student, long teacher, long group, long room, long discipline) {
+    private record Fixture(long owner, long student, long otherStudent, long teacher, long group, long room, long discipline) {
     }
 }
