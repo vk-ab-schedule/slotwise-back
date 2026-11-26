@@ -1,8 +1,12 @@
 package ru.vk.itmo.scheduler.slotwise.solving;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
+import ru.vk.itmo.scheduler.slotwise.common.ApiException;
+import ru.vk.itmo.scheduler.slotwise.common.api.ApiIssue;
+import ru.vk.itmo.scheduler.slotwise.common.api.IssueSeverity;
 import ru.vk.itmo.scheduler.slotwise.domain.Assignment;
 import ru.vk.itmo.scheduler.slotwise.domain.CommissionCandidate;
 import ru.vk.itmo.scheduler.slotwise.domain.Dependency;
@@ -13,6 +17,7 @@ import ru.vk.itmo.scheduler.slotwise.domain.Room;
 import ru.vk.itmo.scheduler.slotwise.domain.SlotRange;
 import ru.vk.itmo.scheduler.slotwise.domain.TimeGrid;
 import ru.vk.itmo.scheduler.slotwise.domain.Weights;
+import ru.vk.itmo.scheduler.slotwise.domain.validation.ScheduleValidator;
 import ru.vk.itmo.scheduler.slotwise.planning.BusyIntervalNormalizer;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityService;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningSessionEntity;
@@ -80,12 +85,11 @@ public class ProblemLoader {
                 """, params);
         var events = jdbc.query("""
                 select e.id, e.duration_minutes, e.format, e.commission_size, e.requires_chair, e.preparation_days,
-                       t.granularity
+                       coalesce(e.granularity, t.granularity)
                 from slotwise.event e join slotwise.event_type t on t.id = e.event_type_id
                 where e.planning_session_id = :session and e.complete
                 """, params, (rs, row) -> event(rs, grid, participants, equipment, supervisors, poolIds)).stream()
-                // An event longer than the whole period cannot be placed anywhere, the grid rejects it.
-                .filter(event -> !event.participants().isEmpty() && event.duration() <= grid.slotCount())
+                .filter(event -> !event.participants().isEmpty())
                 .toList();
 
         Set<Long> people = new HashSet<>(poolIds);
@@ -96,8 +100,10 @@ public class ProblemLoader {
                 join slotwise.session_participant p on p.account_id = t.account_id and p.planning_session_id = :session
                 where t.ends_at > :from and t.starts_at < :to
                 union all
-                select account_id, starts_at, ends_at, importance from slotwise.busy_interval
-                where planning_session_id = :session
+                select b.account_id, b.starts_at, b.ends_at, b.importance from slotwise.busy_interval b
+                join slotwise.session_participant p
+                  on p.planning_session_id = b.planning_session_id and p.account_id = b.account_id
+                where b.planning_session_id = :session and p.response_status = 'SUBMITTED'
                 """, params, rs -> {
             long person = rs.getLong(1);
             var kind = Person.Busy.Kind.valueOf(rs.getString(4));
@@ -132,9 +138,13 @@ public class ProblemLoader {
 
     /**
      * The problem with a variant of the session as the baseline for S5, its locked assignments pinned (H9).
-     * Assignments of events, rooms or commission members that are no longer part of the problem are left out.
+     * Outdated assignments are left out when the caller is inspecting or editing an existing variant.
      */
     public Problem withBaseline(Problem problem, long variantId) {
+        return withBaseline(problem, variantId, false);
+    }
+
+    Problem withBaseline(Problem problem, long variantId, boolean validateLocks) {
         var params = Map.of("variant", variantId);
         var members = new HashMap<Long, List<Long>>();
         var chairs = new HashMap<Long, Long>();
@@ -155,33 +165,57 @@ public class ProblemLoader {
         var grid = problem.grid();
         var baseline = new ArrayList<Assignment>();
         var pinned = new ArrayList<Assignment>();
+        var pinConflicts = new ArrayList<ApiIssue>();
+        long slotSeconds = SLOT_MINUTES * 60L;
         jdbc.query("""
                 select event_id, starts_at, room_id, locked from slotwise.assignment
                 where schedule_variant_id = :variant and status = 'ASSIGNED'
+                order by event_id
                 """, params, rs -> {
             long event = rs.getLong(1);
-            long minutes = Duration.between(grid.origin(), rs.getTimestamp(2).toInstant()).toMinutes();
+            var offset = Duration.between(grid.origin(), rs.getTimestamp(2).toInstant());
+            long start = offset.getSeconds() / slotSeconds;
+            long room = rs.getLong(3);
+            boolean locked = rs.getBoolean(4);
             var commission = members.getOrDefault(event, List.of());
             Long chair = chairs.get(event);
-            if (!events.contains(event) || !rooms.contains(rs.getLong(3)) || !people.containsAll(commission)
-                    || chair != null && !canChair.contains(chair) || minutes < 0
-                    || minutes / SLOT_MINUTES + problem.event(event).duration() > grid.slotCount()) {
+            if (!events.contains(event) || !rooms.contains(room) || !people.containsAll(commission)
+                    || chair != null && !canChair.contains(chair) || offset.isNegative()
+                    || offset.getNano() != 0 || offset.getSeconds() % slotSeconds != 0
+                    || start + problem.event(event).duration() > grid.slotCount()) {
+                if (locked && validateLocks) {
+                    pinConflicts.add(new ApiIssue("PINNED_CONFLICT",
+                            "Зафиксированное назначение не соответствует текущему периоду или составу сессии",
+                            IssueSeverity.ERROR, List.of(event), List.of(), List.of(room)));
+                }
                 return;
             }
-            var assignment = new Assignment(event, (int) (minutes / SLOT_MINUTES), rs.getLong(3), commission,
+            var assignment = new Assignment(event, (int) start, room, commission,
                     chair == null ? OptionalLong.empty() : OptionalLong.of(chair));
             baseline.add(assignment);
-            if (rs.getBoolean(4)) {
+            if (locked) {
                 pinned.add(assignment);
             }
         });
+        if (validateLocks && !pinned.isEmpty()) {
+            ScheduleValidator.validate(problem, pinned).violations().forEach(violation ->
+                    pinConflicts.add(new ApiIssue("PINNED_CONFLICT", violation.message(), IssueSeverity.ERROR,
+                            violation.eventIds(), violation.personIds(), violation.roomIds())));
+        }
+        if (!pinConflicts.isEmpty()) {
+            throw new ApiException(HttpStatus.CONFLICT, "PINNED_CONFLICT",
+                    "Проверьте зафиксированные назначения и исправьте конфликт перед запуском расчёта",
+                    Map.of("issues", pinConflicts));
+        }
         return problem.toBuilder().pinned(pinned).baseline(baseline).build();
     }
 
-    public boolean variantOf(long variantId, long sessionId) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("""
-                select exists(select 1 from slotwise.schedule_variant where id = :variant and planning_session_id = :session)
-                """, Map.of("variant", variantId, "session", sessionId), Boolean.class));
+    /** Locks the version row until the caller has loaded the baseline assignments. */
+    Optional<Long> lockVariantVersion(long variantId, long sessionId) {
+        return jdbc.query("""
+                select version from slotwise.schedule_variant
+                where id = :variant and planning_session_id = :session for share
+                """, Map.of("variant", variantId, "session", sessionId), (rs, row) -> rs.getLong(1)).stream().findFirst();
     }
 
     /**
@@ -204,12 +238,13 @@ public class ProblemLoader {
         ZoneId zone = ZoneId.of(session.getTimeZone());
         long slotSeconds = SLOT_MINUTES * 60L;
         Instant origin = Instant.ofEpochSecond(Math.floorDiv(session.getStartsAt().getEpochSecond(), slotSeconds) * slotSeconds);
-        int slots = Math.toIntExact(-Math.floorDiv(-Duration.between(origin, session.getEndsAt()).toSeconds(), slotSeconds));
+        Duration span = Duration.between(origin, session.getEndsAt());
+        int slots = Math.toIntExact(span.plusSeconds(slotSeconds).minusNanos(1).getSeconds() / slotSeconds);
         var withoutPeriods = new TimeGrid(origin, zone, SLOT_MINUTES, slots, List.of());
         Set<Integer> weekdays = workingDays.findByPlanningSessionId(session.getId()).stream()
                 .map(day -> day.getDayOfWeek().intValue()).collect(Collectors.toSet());
         List<SlotRange> periods = normalizer.workingWindows(session, weekdays).stream()
-                .flatMap(window -> withoutPeriods.covering(window.start(), window.end()).stream())
+                .flatMap(window -> withoutPeriods.containedIn(window.start(), window.end()).stream())
                 .toList();
         return new TimeGrid(origin, zone, SLOT_MINUTES, slots, periods);
     }

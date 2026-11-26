@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRole;
 import ru.vk.itmo.scheduler.slotwise.account.AccountService;
 import ru.vk.itmo.scheduler.slotwise.account.api.dto.AccountResponse;
+import ru.vk.itmo.scheduler.slotwise.account.api.dto.AccountRoleImpactSession;
 import ru.vk.itmo.scheduler.slotwise.account.api.dto.CreateAccountRequest;
 import ru.vk.itmo.scheduler.slotwise.account.api.dto.SetAccountEnabledRequest;
 import ru.vk.itmo.scheduler.slotwise.account.api.dto.SetAccountPasswordRequest;
@@ -31,6 +32,8 @@ import ru.vk.itmo.scheduler.slotwise.account.api.dto.UpdateAccountRequest;
 import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
+
+import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -80,11 +83,19 @@ public class AccountController {
         return accounts.update(id, request);
     }
 
+    @GetMapping("/{id}/role-impact")
+    @Operation(operationId = "listAccountRoleImpact", summary = "Preview planning sessions affected by a role change",
+            description = "ADMIN. Shows sessions the account organizes or participates in before confirming a role change.")
+    public List<AccountRoleImpactSession> listAccountRoleImpact(@PathVariable("id") @Min(1) long id) {
+        return accounts.roleImpact(id);
+    }
+
     @PutMapping("/{id}/role")
     @Operation(operationId = "setAccountRole", summary = "Change the account role",
             description = "ADMIN. Ends the account's active login sessions. Changing one's own role is 403 "
                     + "OWN_ROLE_CHANGE; leaving the system without an active administrator is 409 "
-                    + "LAST_ACTIVE_ADMIN. A stale version returns 409 STALE_ACCOUNT_VERSION.")
+                    + "LAST_ACTIVE_ADMIN. Use listAccountRoleImpact before confirmation. "
+                    + "A stale version returns 409 STALE_ACCOUNT_VERSION.")
     public AccountResponse setAccountRole(@PathVariable("id") @Min(1) long id,
                                           @Valid @RequestBody SetAccountRoleRequest request,
                                           @AuthenticationPrincipal AccountPrincipal admin) {
@@ -104,7 +115,8 @@ public class AccountController {
     @PutMapping("/{id}/password")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(operationId = "setAccountPassword", summary = "Set or reset the account password",
-            description = "ADMIN. Accepts the new password as input only; never returns a password or its hash. "
+            description = "ADMIN. Accepts up to 72 UTF-8 bytes. An oversized password returns 400 VALIDATION_FAILED. "
+                    + "The password and its hash are never returned. "
                     + "Ends the account's login sessions except the caller's own; the account version does "
                     + "not change, and hasPassword becomes true. A stale version returns 409 STALE_ACCOUNT_VERSION.")
     public void setAccountPassword(@PathVariable("id") @Min(1) long id,

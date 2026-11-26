@@ -86,9 +86,6 @@ public final class Problem {
             }
         }
         for (Event event : this.events) {
-            if (event.duration() > grid.slotCount()) {
-                throw new IllegalArgumentException("Event " + event.id() + " is longer than the grid");
-            }
             event.participants().forEach(this::person);
             event.commissionExcluded().forEach(this::person);
         }

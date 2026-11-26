@@ -89,7 +89,7 @@ class PlanningModelContractTests extends ApiContractTestBase {
                  "dependencies":[{"predecessorEventId":1,"minGapDays":1,"maxGapDays":2}]}
                 """;
         mvc.perform(put("/api/sessions/1/events/2").contentType(MediaType.APPLICATION_JSON).content(event))
-                .andExpect(status().isNotImplemented());
+                .andExpect(status().isOk());
         mvc.perform(put("/api/sessions/1/events/2").contentType(MediaType.APPLICATION_JSON)
                         .content(event.replace("\"requiresChair\":false", "\"requiresChair\":true")))
                 .andExpect(status().isBadRequest())

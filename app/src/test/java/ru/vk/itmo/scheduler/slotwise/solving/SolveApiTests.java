@@ -11,16 +11,26 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import ru.vk.itmo.scheduler.slotwise.ApiTestSupport;
 import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
+import ru.vk.itmo.scheduler.slotwise.domain.solver.SolveResult;
 
 import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -36,6 +46,10 @@ class SolveApiTests {
     JdbcTemplate jdbc;
     @Autowired
     PasswordEncoder passwordEncoder;
+    @MockitoSpyBean
+    SolverJobRunner runner;
+    @MockitoSpyBean
+    Clock clock;
     ApiTestSupport api;
     SessionFixture f;
     Cookie organizer;
@@ -131,24 +145,206 @@ class SolveApiTests {
         awaitCompletion(job);
     }
 
+    @Test
+    void returnsTheActiveJobBeforeAnOlderMatchingJobAndQueuesOtherSessions() throws Exception {
+        f.consultation(true);
+        var second = new SessionFixture(api, jdbc);
+        second.consultation(true);
+        Cookie secondOrganizer = api.login(second.organizer);
+        long completed = jobId(solve("GREEDY", 0, null));
+        awaitCompletion(completed);
+
+        var running = new CountDownLatch(1);
+        var proceed = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            running.countDown();
+            if (!proceed.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("The test did not release the worker");
+            }
+            return invocation.callRealMethod();
+        }).when(runner).solve(argThat(run -> run.sessionId() == f.session && run.params().seed() == 8));
+
+        long active = jobId(solve(f, organizer, "GREEDY", 0, null, 8));
+        long queued;
+        try {
+            assertThat(running.await(10, TimeUnit.SECONDS)).isTrue();
+            poll(active).andExpect(jsonPath("$.status").value("RUNNING"))
+                    .andExpect(jsonPath("$.progress").isNumber());
+            solve("GREEDY", 0, null)
+                    .andExpect(status().isAccepted())
+                    .andExpect(jsonPath("$.id").value(active));
+            queued = jobId(solve(second, secondOrganizer, "GREEDY", 0, null, 7)
+                    .andExpect(status().isAccepted())
+                    .andExpect(jsonPath("$.status").value("QUEUED"))
+                    .andExpect(jsonPath("$.queuePosition").value(1)));
+            mvc.perform(get("/api/jobs/" + queued).cookie(secondOrganizer))
+                    .andExpect(jsonPath("$.status").value("QUEUED"));
+        } finally {
+            proceed.countDown();
+        }
+        awaitCompletion(active);
+        awaitCompletion(queued, secondOrganizer, "COMPLETED");
+        solve("GREEDY", 0, null).andExpect(jsonPath("$.id").value(completed));
+    }
+
+    @Test
+    void reportsAnOutOfPeriodLockInsteadOfSilentlyMovingTheEvent() throws Exception {
+        long event = f.consultation(true);
+        long variant = resultId(awaitCompletion(jobId(solve("GREEDY", 0, null))));
+        jdbc.update("""
+                update slotwise.assignment set starts_at = '2027-01-21T15:00Z', ends_at = '2027-01-21T15:30Z',
+                    locked = true where schedule_variant_id = ?
+                """, variant);
+        jdbc.update("update slotwise.planning_session set ends_at = '2027-01-20T00:00Z', input_version = 1 where id = ?",
+                f.session);
+
+        solve("GREEDY", 1, variant).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PINNED_CONFLICT"))
+                .andExpect(jsonPath("$.issues[0].eventIds[0]").value(event));
+        assertThat(jdbc.queryForObject("select count(*) from slotwise.solver_job where planning_session_id = ?",
+                Integer.class, f.session)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select locked from slotwise.assignment where schedule_variant_id = ?",
+                Boolean.class, variant)).isTrue();
+    }
+
+    @Test
+    void editedBaseVariantStartsANewCalculationAtTheSameInputVersion() throws Exception {
+        long event = f.consultation(true);
+        long base = resultId(awaitCompletion(jobId(solve("GREEDY", 0, null))));
+        long beforeEdit = jobId(solve("GREEDY", 0, base));
+        awaitCompletion(beforeEdit);
+        solve("GREEDY", 0, base).andExpect(jsonPath("$.id").value(beforeEdit));
+        jdbc.update("""
+                update slotwise.assignment set starts_at = '2027-01-21T15:00Z', ends_at = '2027-01-21T15:30Z',
+                    locked = true where schedule_variant_id = ?
+                """, base);
+        jdbc.update("update slotwise.schedule_variant set version = version + 1 where id = ?", base);
+
+        long afterEdit = jobId(solve("GREEDY", 0, base).andExpect(jsonPath("$.inputVersion").value(0)));
+        assertThat(afterEdit).isNotEqualTo(beforeEdit);
+        long result = resultId(awaitCompletion(afterEdit));
+        Timestamp start = jdbc.queryForObject("""
+                select starts_at from slotwise.assignment where schedule_variant_id = ? and event_id = ? and locked
+                """, Timestamp.class, result, event);
+        assertThat(start.toInstant()).isEqualTo(Instant.parse("2027-01-21T15:00:00Z"));
+    }
+
+    @Test
+    void recordsCollectionStateForEachNewJobOnTheSameInputSnapshot() throws Exception {
+        f.consultation(true);
+        f.submitted(f.teacher);
+        f.submitted(f.student);
+        f.submitted(f.otherStudent);
+        doReturn(Instant.parse("2027-01-09T23:59:59Z")).when(clock).instant();
+        long first = jobId(solve("GREEDY", 0, null));
+        awaitCompletion(first);
+        doReturn(Instant.parse("2027-01-10T00:00:01Z")).when(clock).instant();
+
+        long second = jobId(solve(f, organizer, "GREEDY", 0, null, 8));
+        awaitCompletion(second);
+        var rows = jdbc.queryForList("""
+                select input_snapshot_id, incomplete_data from slotwise.solver_job
+                where planning_session_id = ? order by id
+                """, f.session);
+        assertThat(rows).hasSize(2);
+        assertThat(rows.getFirst()).containsEntry("incomplete_data", true);
+        assertThat(rows.getLast()).containsEntry("incomplete_data", false)
+                .containsEntry("input_snapshot_id", rows.getFirst().get("input_snapshot_id"));
+    }
+
+    @Test
+    void pollingKeepsTheOriginalOutcomeAfterTheDraftIsEdited() throws Exception {
+        f.consultation(true);
+        long job = jobId(solve("CP_SAT", 0, null));
+        String original = awaitCompletion(job);
+        long variant = resultId(original);
+        jdbc.update("""
+                update slotwise.schedule_variant set objective = 999, solve_status = 'FEASIBLE', best_bound = null,
+                    metrics = '{"unassignedEvents": 1}'::jsonb, version = version + 1 where id = ?
+                """, variant);
+
+        String polled = poll(job).andReturn().getResponse().getContentAsString();
+        assertThat(resultId(polled)).isEqualTo(variant);
+        assertThat(JsonPath.<String>read(polled, "$.solveStatus"))
+                .isEqualTo(JsonPath.<String>read(original, "$.solveStatus"));
+        assertThat(JsonPath.<Map<String, Object>>read(polled, "$.quality"))
+                .isEqualTo(JsonPath.<Map<String, Object>>read(original, "$.quality"));
+    }
+
+    @Test
+    void distinguishesNoSolutionFromFailureAndAllowsRetryAfterFailure() throws Exception {
+        f.consultation(true);
+        doReturn(SolveResult.noSolution(Duration.ZERO)).when(runner)
+                .solve(argThat(run -> run != null && run.params().seed() == 8));
+        doThrow(new IllegalStateException("Technical diagnostic"))
+                .doCallRealMethod().when(runner).solve(argThat(run -> run != null && run.params().seed() == 9));
+
+        long empty = jobId(solve(f, organizer, "GREEDY", 0, null, 8));
+        awaitCompletion(empty);
+        poll(empty).andExpect(jsonPath("$.solveStatus").value("NO_SOLUTION"))
+                .andExpect(jsonPath("$.error").isEmpty())
+                .andExpect(jsonPath("$.resultId").isEmpty());
+        long failed = jobId(solve(f, organizer, "GREEDY", 0, null, 9));
+        awaitCompletion(failed, organizer, "FAILED");
+        poll(failed).andExpect(jsonPath("$.error.code").value("SOLVER_FAILED"))
+                .andExpect(jsonPath("$.solveStatus").isEmpty())
+                .andExpect(jsonPath("$.resultId").isEmpty());
+        long retried = jobId(solve(f, organizer, "GREEDY", 0, null, 9));
+        assertThat(retried).isNotEqualTo(failed);
+        awaitCompletion(retried);
+    }
+
+    @Test
+    void persistsAnEventLongerThanTheSessionAsUnassigned() throws Exception {
+        jdbc.update("""
+                update slotwise.planning_session
+                set starts_at = '2027-01-18T09:00Z', ends_at = '2027-01-18T10:00Z' where id = ?
+                """, f.session);
+        long event = f.event("Экзамен по дисциплине", 90, true);
+        f.participant(event, f.student, "STUDENT");
+        long variant = resultId(awaitCompletion(jobId(solve("GREEDY", 0, null))));
+
+        assertThat(jdbc.queryForObject("""
+                select explanation::text from slotwise.assignment
+                where schedule_variant_id = ? and event_id = ? and status = 'UNASSIGNED'
+                """, String.class, variant, event)).contains("EVENT_LONGER_THAN_WORKING_DAY");
+    }
+
     private ResultActions solve(String algorithm, long version, Long baseVariantId) throws Exception {
-        return mvc.perform(post(f.path("solve")).cookie(organizer).with(api.xsrf())
+        return solve(f, organizer, algorithm, version, baseVariantId, 7);
+    }
+
+    private ResultActions solve(SessionFixture fixture, Cookie owner, String algorithm, long version,
+                                Long baseVariantId, long seed) throws Exception {
+        return mvc.perform(post(fixture.path("solve")).cookie(owner).with(api.xsrf())
                 .contentType(MediaType.APPLICATION_JSON).content("""
-                        {"expectedInputVersion": %d, "algorithm": "%s", "timeLimitSeconds": 1, "seed": 7, "baseVariantId": %s}
-                        """.formatted(version, algorithm, baseVariantId)));
+                        {"expectedInputVersion": %d, "algorithm": "%s", "timeLimitSeconds": 1, "seed": %d, "baseVariantId": %s}
+                        """.formatted(version, algorithm, seed, baseVariantId)));
     }
 
     private static long jobId(ResultActions result) throws Exception {
         return JsonPath.<Number>read(result.andReturn().getResponse().getContentAsString(), "$.id").longValue();
     }
 
+    private static long resultId(String completed) {
+        return JsonPath.<Number>read(completed, "$.resultId").longValue();
+    }
+
+    private ResultActions poll(long job) throws Exception {
+        return mvc.perform(get("/api/jobs/" + job).cookie(organizer)).andExpect(status().isOk());
+    }
+
     private String awaitCompletion(long job) throws Exception {
+        return awaitCompletion(job, organizer, "COMPLETED");
+    }
+
+    private String awaitCompletion(long job, Cookie owner, String expectedStatus) throws Exception {
         for (int attempt = 0; attempt < 300; attempt++) {
-            String body = mvc.perform(get("/api/jobs/" + job).cookie(organizer)).andExpect(status().isOk())
+            String body = mvc.perform(get("/api/jobs/" + job).cookie(owner)).andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
             String state = JsonPath.read(body, "$.status");
             if (!state.equals("QUEUED") && !state.equals("RUNNING")) {
-                assertThat(state).as(body).isEqualTo("COMPLETED");
+                assertThat(state).as(body).isEqualTo(expectedStatus);
                 return body;
             }
             Thread.sleep(100);

@@ -22,6 +22,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import ru.vk.itmo.scheduler.slotwise.university.api.UniversityCatalogController;
 
 import java.util.List;
 import java.util.Map;
@@ -37,24 +38,44 @@ public class OpenApiConfiguration {
             "changeCollectionDeadline",
             "closeCollection",
             "createAccount",
+            "createSession",
+            "createSessionEvents",
+            "deleteSessionEvent",
+            "generateUniversityDemoData",
             "getAccount",
             "getCollection",
+            "getCommissionPool",
             "getCurrentUser",
+            "getEventType",
             "getMyBusyCalendar",
+            "getSession",
+            "getSessionEvent",
+            "getSessionParticipants",
+            "getSessionRooms",
             "getSessionRules",
             "getSolverJob",
+            "importUniversityData",
+            "listAccountRoleImpact",
             "listAccounts",
+            "listEventTypes",
+            "listSessionEvents",
+            "listSessions",
             "listSolvers",
             "login",
             "precheckSession",
+            "replaceCommissionPool",
             "replaceMyBusyCalendar",
+            "replaceSessionParticipants",
+            "replaceSessionRooms",
             "replaceSessionRules",
             "setAccountEnabled",
             "setAccountPassword",
             "setAccountRole",
             "solveSession",
             "submitMyBusyCalendar",
-            "updateAccount");
+            "updateAccount",
+            "updateSession",
+            "updateSessionEvent");
 
     @Bean
     OpenApiCustomizer nullableReferences() {
@@ -138,6 +159,14 @@ public class OpenApiConfiguration {
             }
             errors.forEach((code, description) -> operation.getResponses().addApiResponse(code,
                     problemResponse(description)));
+            if (handler.getBeanType() == UniversityCatalogController.class) {
+                operation.getResponses().remove("501");
+            }
+            if ("listUniversityTimetable".equals(operation.getOperationId())) {
+                operation.getResponses().addApiResponse("400", problemResponse(
+                        "Returns INVALID_TIMETABLE_RANGE when startsAt >= endsAt. Malformed date parameters "
+                                + "return INVALID_REQUEST."));
+            }
             if ("getPersonalSchedule".equals(operation.getOperationId())) {
                 operation.getResponses().addApiResponse("400", problemResponse(
                         "Returns INVALID_SCHEDULE_RANGE when from >= to. Missing or malformed date parameters "

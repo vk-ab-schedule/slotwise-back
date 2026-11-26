@@ -250,6 +250,20 @@ class CpsatSolverTests {
                 .isEqualTo(new Score(0, Weights.DEFAULT.movedEvents()));
     }
 
+    @Test
+    void keepsAnEventLongerThanTheGridUnassigned() {
+        Problem problem = problem(new SlotRange(0, 6))
+                .person(new Person(1, Person.Role.STUDENT, List.of()))
+                .event(event(1, Event.Scope.INDIVIDUAL, 9, List.of(1L)))
+                .event(event(2, Event.Scope.INDIVIDUAL, 6, List.of(1L)))
+                .build();
+
+        SolveResult result = new CpsatSolver().solve(problem, PARAMS, ProgressListener.NONE);
+
+        assertThat(result.assignments()).extracting(Assignment::eventId).containsExactly(2L);
+        assertThat(result.score()).contains(new Score(1, 0));
+    }
+
     private static Problem.ProblemBuilder problem(SlotRange... workingPeriods) {
         int horizon = List.of(workingPeriods).stream().mapToInt(SlotRange::end).max().orElseThrow();
         return Problem.builder()

@@ -17,11 +17,13 @@ import ru.vk.itmo.scheduler.slotwise.domain.precheck.Prechecks;
 import ru.vk.itmo.scheduler.slotwise.domain.solver.ProgressListener;
 import ru.vk.itmo.scheduler.slotwise.domain.solver.SchedulingSolver;
 import ru.vk.itmo.scheduler.slotwise.domain.solver.SolveParams;
+import ru.vk.itmo.scheduler.slotwise.domain.solver.SolveResult;
 import ru.vk.itmo.scheduler.slotwise.domain.validation.ScheduleValidator;
 import ru.vk.itmo.scheduler.slotwise.schedule.VariantStore;
 import ru.vk.itmo.scheduler.slotwise.schedule.api.dto.ScheduleMetrics;
 import ru.vk.itmo.scheduler.slotwise.solver.cpsat.CpsatSolver;
 import ru.vk.itmo.scheduler.slotwise.solver.greedy.GreedySolver;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -53,15 +55,17 @@ public class SolverJobRunner {
     private final VariantStore variants;
     private final TransactionTemplate transaction;
     private final Clock clock;
+    private final JsonMapper json;
     private final ExecutorService executor;
     private final Map<Long, ProgressListener.Progress> progress = new ConcurrentHashMap<>();
 
     SolverJobRunner(SolverJobRepository jobs, VariantStore variants, PlatformTransactionManager transactions, Clock clock,
-                    @Value("${slotwise.solving.max-concurrent-jobs:1}") int maxConcurrentJobs) {
+                    JsonMapper json, @Value("${slotwise.solving.max-concurrent-jobs:1}") int maxConcurrentJobs) {
         this.jobs = jobs;
         this.variants = variants;
         this.transaction = new TransactionTemplate(transactions);
         this.clock = clock;
+        this.json = json;
         this.executor = Executors.newFixedThreadPool(maxConcurrentJobs, Thread.ofPlatform().name("solver-", 1).factory());
     }
 
@@ -112,9 +116,9 @@ public class SolverJobRunner {
                 job.setStatus(SolverJobStatus.RUNNING);
                 job.setStartedAt(clock.instant());
             });
-            var result = SOLVERS.get(run.algorithm()).get()
-                    .solve(run.problem(), run.params(), best -> progress.put(run.jobId(), best));
+            var result = solve(run);
             transaction.executeWithoutResult(status -> {
+                var job = jobs.findById(run.jobId()).orElseThrow();
                 if (result.score().isPresent()) {
                     // The result is not trusted: the common validator checks it and computes the metrics.
                     var validation = ScheduleValidator.validate(run.problem(), result.assignments());
@@ -123,21 +127,28 @@ public class SolverJobRunner {
                     }
                     var metrics = ScheduleMetrics.of(validation, run.problem().weights(),
                             SolveStatus.valueOf(result.status().name()), result.elapsed().toMillis(), result.penaltyBound());
-                    variants.saveDraft(new VariantStore.Draft(run.sessionId(), run.snapshotId(), run.jobId(),
+                    long draftId = variants.saveDraft(new VariantStore.Draft(run.sessionId(), run.snapshotId(), run.jobId(),
                             run.baseVariantId(), run.problem(), result.assignments(),
                             run.problem().pinned().stream().map(Assignment::eventId).collect(Collectors.toSet()),
                             metrics, explanations(run.problem())));
+                    job.setCompletedResult(json.writeValueAsString(new SolverJobEntity.CompletedResult(draftId,
+                            metrics.solveStatus(), metrics.unassignedEvents(), metrics.penalty(),
+                            result.penaltyBound().isPresent() ? result.penaltyBound().getAsLong() : null)));
                 }
-                var job = jobs.findById(run.jobId()).orElseThrow();
                 job.setStatus(SolverJobStatus.COMPLETED);
                 job.setFinishedAt(clock.instant());
             });
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | LinkageError e) {
             log.error("Solver job {} failed", run.jobId(), e);
             update(run.jobId(), job -> fail(job, "SOLVER_FAILED"));
         } finally {
             progress.remove(run.jobId());
         }
+    }
+
+    SolveResult solve(Run run) {
+        return SOLVERS.get(run.algorithm()).get()
+                .solve(run.problem(), run.params(), best -> progress.put(run.jobId(), best));
     }
 
     /**
