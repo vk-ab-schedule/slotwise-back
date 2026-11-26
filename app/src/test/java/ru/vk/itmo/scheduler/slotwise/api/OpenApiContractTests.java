@@ -65,13 +65,9 @@ class OpenApiContractTests extends ApiContractTestBase {
     }
 
     @Test
-    void validSessionRequestReturnsAnHonestNotImplementedProblem() throws Exception {
+    void validSessionRequestUsesTheCreatedResponse() throws Exception {
         mvc.perform(post("/api/sessions").contentType(MediaType.APPLICATION_JSON).content(CREATE_SESSION))
-                .andExpect(status().isNotImplemented())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(jsonPath("$.status").value(501))
-                .andExpect(jsonPath("$.code").value("NOT_IMPLEMENTED"))
-                .andExpect(jsonPath("$.instance").value("/api/sessions"));
+                .andExpect(status().isCreated());
     }
 
     @Test

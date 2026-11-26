@@ -68,9 +68,7 @@ class AccountEventTypeContractTests extends ApiContractTestBase {
                 Arguments.of("PUT", "/api/admin/accounts/1/enabled", "{\"expectedVersion\":0,\"enabled\":false}"),
                 Arguments.of("PUT", "/api/admin/accounts/1/password",
                         "{\"expectedVersion\":0,\"password\":\"" + "x".repeat(128) + "\"}"),
-                Arguments.of("GET", "/api/event-types", null),
                 Arguments.of("POST", "/api/event-types", CREATE_EVENT_TYPE),
-                Arguments.of("GET", "/api/event-types/1", null),
                 Arguments.of("PUT", "/api/event-types/1", UPDATE_EVENT_TYPE),
                 Arguments.of("DELETE", "/api/event-types/1?expectedVersion=0", null));
     }
@@ -82,7 +80,7 @@ class AccountEventTypeContractTests extends ApiContractTestBase {
                 .andExpect(status().isNotImplemented());
         mvc.perform(get("/api/event-types").param("search", "Защита").param("active", "true")
                         .param("page", "0").param("size", "100"))
-                .andExpect(status().isNotImplemented());
+                .andExpect(status().isOk());
     }
 
     @ParameterizedTest

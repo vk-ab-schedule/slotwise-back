@@ -122,7 +122,11 @@ public class OpenApiConfiguration {
             }
             if (List.of("login", "getCurrentUser", "getMyBusyCalendar", "replaceMyBusyCalendar",
                     "submitMyBusyCalendar", "getCollection", "closeCollection", "changeCollectionDeadline",
-                    "getSessionRules", "replaceSessionRules").contains(operation.getOperationId())) {
+                    "getSessionRules", "replaceSessionRules", "listSessions", "getSession", "createSession", "updateSession",
+                    "getSessionParticipants", "replaceSessionParticipants", "getCommissionPool", "replaceCommissionPool",
+                    "getSessionRooms", "replaceSessionRooms", "listSessionEvents", "getSessionEvent", "createSessionEvents",
+                    "updateSessionEvent", "deleteSessionEvent", "listEventTypes", "getEventType")
+                    .contains(operation.getOperationId())) {
                 operation.getResponses().remove("501");
             }
             RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(), RequestMapping.class);
