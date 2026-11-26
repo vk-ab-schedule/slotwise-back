@@ -60,7 +60,7 @@ import java.util.stream.Collectors;
 public class VariantService {
     private static final String HEADER = """
             select v.id, v.planning_session_id, v.input_snapshot_id, s.input_version, ps.input_version as current_version,
-                   coalesce((s.problem ->> 'incompleteData')::boolean, false) as incomplete,
+                   j.incomplete_data as incomplete,
                    coalesce(s.problem -> 'nonRespondentIds', '[]')::text as non_respondents,
                    v.solver_job_id, j.algorithm, j.parameters::text as parameters, v.base_variant_id, v.status,
                    v.version, v.metrics::text as metrics, v.created_at, v.published_at, v.published_by

@@ -10,13 +10,19 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import ru.vk.itmo.scheduler.slotwise.ApiTestSupport;
 import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
 import ru.vk.itmo.scheduler.slotwise.solving.SessionFixture;
 
+import java.time.Clock;
+import java.time.Instant;
+
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.mockito.Mockito.doReturn;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -37,6 +43,8 @@ class VariantApiTests {
     JdbcTemplate jdbc;
     @Autowired
     PasswordEncoder passwordEncoder;
+    @MockitoSpyBean
+    Clock clock;
     ApiTestSupport api;
     SessionFixture f;
     Cookie organizer;
@@ -73,6 +81,31 @@ class VariantApiTests {
         mvc.perform(get("/api/variants/" + variant).cookie(api.login(api.account("ORGANIZER"))))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("VARIANT_NOT_FOUND"));
+    }
+
+    @Test
+    void variantUsesTheCollectionStateOfItsJobEvenWhenTheInputSnapshotIsReused() throws Exception {
+        f.consultation(true);
+        f.submitted(f.teacher);
+        f.submitted(f.student);
+        f.submitted(f.otherStudent);
+        doReturn(Instant.parse("2027-01-09T23:59:59Z")).when(clock).instant();
+        long first = f.draft(mvc, api, organizer, 1);
+        long snapshot = jdbc.queryForObject("select input_snapshot_id from slotwise.schedule_variant where id = ?",
+                Long.class, first);
+
+        doReturn(Instant.parse("2027-01-10T00:00:01Z")).when(clock).instant();
+        long second = f.draft(mvc, api, organizer, 2);
+        mvc.perform(get("/api/variants/" + first).cookie(organizer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.incompleteData").value(true));
+        mvc.perform(get("/api/variants/" + second).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inputSnapshotId").value(snapshot))
+                .andExpect(jsonPath("$.incompleteData").value(false));
+        mvc.perform(get(f.path("variants")).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == " + first + ")].incompleteData", contains(true)))
+                .andExpect(jsonPath("$.items[?(@.id == " + second + ")].incompleteData", contains(false)));
     }
 
     @Test
