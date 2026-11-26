@@ -132,17 +132,12 @@ public class SolverJobRunner {
         Run run;
         synchronized (queue) {
             run = queue.removeFirst();
-            try {
-                update(run.jobId(), job -> {
-                    job.setStatus(SolverJobStatus.RUNNING);
-                    job.setStartedAt(clock.instant());
-                });
-            } catch (RuntimeException e) {
-                failRun(run, e);
-                return;
-            }
         }
         try {
+            update(run.jobId(), job -> {
+                job.setStatus(SolverJobStatus.RUNNING);
+                job.setStartedAt(clock.instant());
+            });
             var result = solve(run);
             transaction.executeWithoutResult(status -> {
                 var job = jobs.findById(run.jobId()).orElseThrow();
@@ -166,15 +161,11 @@ public class SolverJobRunner {
                 job.setFinishedAt(clock.instant());
             });
         } catch (RuntimeException | LinkageError e) {
-            failRun(run, e);
+            log.error("Solver job {} failed", run.jobId(), e);
+            update(run.jobId(), job -> fail(job, "SOLVER_FAILED"));
         } finally {
             progress.remove(run.jobId());
         }
-    }
-
-    private void failRun(Run run, Throwable error) {
-        log.error("Solver job {} failed", run.jobId(), error);
-        update(run.jobId(), job -> fail(job, "SOLVER_FAILED"));
     }
 
     SolveResult solve(Run run) {

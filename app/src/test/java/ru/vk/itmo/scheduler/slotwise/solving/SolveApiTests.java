@@ -19,6 +19,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import ru.vk.itmo.scheduler.slotwise.ApiTestSupport;
 import ru.vk.itmo.scheduler.slotwise.TestcontainersConfiguration;
 import ru.vk.itmo.scheduler.slotwise.domain.solver.SolveResult;
+import ru.vk.itmo.scheduler.slotwise.solving.api.dto.SolveRequest;
 
 import java.sql.Timestamp;
 import java.time.Clock;
@@ -53,6 +54,8 @@ class SolveApiTests {
     PasswordEncoder passwordEncoder;
     @Autowired
     PlatformTransactionManager transactions;
+    @Autowired
+    SolvingService solving;
     @MockitoSpyBean
     SolverJobRunner runner;
     @MockitoSpyBean
@@ -192,6 +195,32 @@ class SolveApiTests {
         awaitCompletion(active);
         awaitCompletion(queued, secondOrganizer, "COMPLETED");
         solve("GREEDY", 0, null).andExpect(jsonPath("$.id").value(completed));
+    }
+
+    @Test
+    void pollsWhileTheWorkerIsStillUpdatingJobStatus() throws Exception {
+        f.consultation(true);
+        var updatingStatus = new CountDownLatch(1);
+        var finishUpdate = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().startsWith("solver-")) {
+                updatingStatus.countDown();
+                assertThat(finishUpdate.await(15, TimeUnit.SECONDS)).isTrue();
+            }
+            return invocation.callRealMethod();
+        }).when(clock).instant();
+
+        long job = solving.enqueue(f.session, f.organizer, new SolveRequest(0L, SolverAlgorithm.GREEDY, 1, 7L, null));
+        try (var callers = Executors.newVirtualThreadPerTaskExecutor()) {
+            try {
+                assertThat(updatingStatus.await(10, TimeUnit.SECONDS)).isTrue();
+                var response = callers.submit(() -> poll(job).andExpect(jsonPath("$.status").value("QUEUED")));
+                response.get(5, TimeUnit.SECONDS);
+            } finally {
+                finishUpdate.countDown();
+            }
+        }
+        awaitCompletion(job);
     }
 
     @Test
