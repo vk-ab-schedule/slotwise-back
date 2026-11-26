@@ -3,6 +3,7 @@ package ru.vk.itmo.scheduler.slotwise.eventtype.api;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -21,14 +22,17 @@ import org.springframework.web.bind.annotation.RestController;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
 import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
+import ru.vk.itmo.scheduler.slotwise.eventtype.EventTypeCatalog;
 import ru.vk.itmo.scheduler.slotwise.eventtype.api.dto.CreateEventTypeRequest;
 import ru.vk.itmo.scheduler.slotwise.eventtype.api.dto.EventTypeResponse;
 import ru.vk.itmo.scheduler.slotwise.eventtype.api.dto.UpdateEventTypeRequest;
 
 @RestController
+@RequiredArgsConstructor
 @RequestMapping(value = ApiPaths.EVENT_TYPES, produces = "application/json")
 @Tag(name = "Event types", description = "System-wide templates maintained by ADMIN and available to ORGANIZER")
 public class EventTypeController {
+    private final EventTypeCatalog service;
 
     @GetMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'ORGANIZER')")
@@ -39,7 +43,7 @@ public class EventTypeController {
             @RequestParam(name = "active", required = false) Boolean active,
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
-        throw ContractStub.notImplemented();
+        return service.list(search, active, page, size);
     }
 
     @PostMapping
@@ -56,7 +60,7 @@ public class EventTypeController {
     @PreAuthorize("hasAnyRole('ADMIN', 'ORGANIZER')")
     @Operation(operationId = "getEventType", summary = "Get an event template", description = "ADMIN or ORGANIZER.")
     public EventTypeResponse getEventType(@PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+        return service.get(id);
     }
 
     @PutMapping("/{id}")

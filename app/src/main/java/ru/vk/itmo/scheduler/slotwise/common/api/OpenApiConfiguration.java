@@ -111,8 +111,18 @@ public class OpenApiConfiguration {
             }
             errors.forEach((code, description) -> operation.getResponses().addApiResponse(code,
                     problemResponse(description)));
+            if ("getPersonalSchedule".equals(operation.getOperationId())) {
+                operation.getResponses().addApiResponse("400", problemResponse(
+                        "Returns INVALID_SCHEDULE_RANGE when from >= to. Missing or malformed date parameters "
+                                + "return INVALID_REQUEST."));
+            }
             if (List.of("login", "getCurrentUser", "getMyBusyCalendar", "replaceMyBusyCalendar",
                     "submitMyBusyCalendar", "getCollection", "closeCollection", "changeCollectionDeadline",
+                    "getSessionRules", "replaceSessionRules", "listSessions", "getSession", "createSession", "updateSession",
+                    "getSessionParticipants", "replaceSessionParticipants", "getCommissionPool", "replaceCommissionPool",
+                    "getSessionRooms", "replaceSessionRooms", "listSessionEvents", "getSessionEvent", "createSessionEvents",
+                    "updateSessionEvent", "deleteSessionEvent", "listEventTypes", "getEventType")
+                    .contains(operation.getOperationId())) {
                     "getSessionRules", "replaceSessionRules", "importUniversityData", "generateUniversityDemoData").contains(operation.getOperationId())) {
                 operation.getResponses().remove("501");
             }
