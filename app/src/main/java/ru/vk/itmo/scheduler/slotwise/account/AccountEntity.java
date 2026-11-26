@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.DynamicInsert;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.OptimisticLock;
 import org.hibernate.annotations.SourceType;
@@ -28,6 +29,7 @@ import java.time.Instant;
 @Getter
 @Setter
 @DynamicInsert
+@DynamicUpdate
 @Table(name = "account")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AccountEntity {

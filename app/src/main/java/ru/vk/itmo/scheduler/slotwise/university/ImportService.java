@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRole;
+import ru.vk.itmo.scheduler.slotwise.account.AccountService;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiIssue;
 import ru.vk.itmo.scheduler.slotwise.common.api.IssueSeverity;
 import ru.vk.itmo.scheduler.slotwise.datagen.DatasetGenerator;
@@ -39,6 +40,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -55,9 +57,11 @@ public class ImportService {
     private static final Instant LATEST_TIMETABLE_TIME = Instant.parse("+10000-01-01T00:00:00Z");
 
     private final ImportStore store;
+    private final AccountService accountService;
 
-    public ImportService(JdbcTemplate jdbc, NamedParameterJdbcTemplate namedJdbc) {
+    public ImportService(JdbcTemplate jdbc, NamedParameterJdbcTemplate namedJdbc, AccountService accountService) {
         store = new ImportStore(jdbc, namedJdbc);
+        this.accountService = accountService;
     }
 
     @Transactional
@@ -177,6 +181,8 @@ public class ImportService {
             var next = new Account(email, input.firstName(), input.lastName(), input.patronymic(), input.role(),
                     input.timeZone(), hash);
             boolean roleChanged = previous != null && previous.value.role() != next.role();
+            boolean passwordChanged = previous != null
+                    && !Objects.equals(previous.value.passwordHash(), next.passwordHash());
             if (roleChanged && store.isPlanningParticipant(previous.id)) {
                 diagnostics.add(new UniversityImportDiagnostic(path + ".role",
                         new ApiIssue("PLANNING_PARTICIPANT_ROLE_CHANGED",
@@ -187,6 +193,9 @@ public class ImportService {
             emails.add(email);
             return stage(accounts, input.externalId(), previous, next, row -> {
                 store.saveAccount(input.externalId(), previous, row);
+                if (roleChanged || passwordChanged) {
+                    accountService.endSessions(row.id);
+                }
                 if (roleChanged) {
                     affectedAccounts.add(row.id);
                 }
