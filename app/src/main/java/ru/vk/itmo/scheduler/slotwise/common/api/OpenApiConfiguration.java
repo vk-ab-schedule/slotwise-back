@@ -121,7 +121,8 @@ public class OpenApiConfiguration {
                     "getSessionRules", "replaceSessionRules", "listSessions", "getSession", "createSession", "updateSession",
                     "getSessionParticipants", "replaceSessionParticipants", "getCommissionPool", "replaceCommissionPool",
                     "getSessionRooms", "replaceSessionRooms", "listSessionEvents", "getSessionEvent", "createSessionEvents",
-                    "updateSessionEvent", "deleteSessionEvent", "listEventTypes", "getEventType")
+                    "updateSessionEvent", "deleteSessionEvent", "listEventTypes", "getEventType",
+                    "importUniversityData", "generateUniversityDemoData")
                     .contains(operation.getOperationId())) {
                 operation.getResponses().remove("501");
             }

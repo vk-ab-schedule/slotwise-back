@@ -68,6 +68,7 @@ public final class DatasetGenerator {
             "Алексеев", "Михайлов", "Игорев", "Олегов");
 
     private final DatasetProfile profile;
+    private final String demoDatasetKey;
     private final RandomGenerator random;
     private final List<LocalDate> days = new ArrayList<>();
     private final TimeGrid grid;
@@ -86,6 +87,7 @@ public final class DatasetGenerator {
 
     private DatasetGenerator(DatasetProfile profile, long seed) {
         this.profile = profile;
+        demoDatasetKey = "demo-" + profile.name().toLowerCase(Locale.ROOT) + "-" + seed;
         // A named algorithm gives the same sequence on every JDK.
         this.random = RandomGeneratorFactory.of("L64X128MixRandom").create(seed);
         for (LocalDate day = FIRST_DAY; days.size() < profile.days(); day = day.plusDays(1)) {
@@ -113,7 +115,8 @@ public final class DatasetGenerator {
     }
 
     /**
-     * University data for the demo import; every account has the password {@link #DEMO_PASSWORD}.
+     * University data for the demo import. External IDs and emails identify the profile and seed,
+     * so datasets can coexist. Every account has the password {@link #DEMO_PASSWORD}.
      */
     public static UniversityData university(DatasetProfile profile, long seed) {
         return new DatasetGenerator(profile, seed).toUniversity();
@@ -217,7 +220,8 @@ public final class DatasetGenerator {
 
     private UniversityData toUniversity() {
         List<UniversityData.Account> accounts = new ArrayList<>();
-        accounts.add(new UniversityData.Account("organizer", "organizer@demo.slotwise.ru", "Организатор", "Демо",
+        String organizerId = demoId("organizer");
+        accounts.add(new UniversityData.Account(organizerId, demoEmail(organizerId), "Организатор", "Демо",
                 null, UniversityData.Role.ORGANIZER, ZONE.getId(), DEMO_PASSWORD_HASH));
         classes.keySet().forEach(id -> accounts.add(account(id)));
 
@@ -226,12 +230,12 @@ public final class DatasetGenerator {
             groupData.add(new UniversityData.Group(groupId(g), groupId(g), groups.get(g).stream().map(this::accountId).toList()));
         }
         List<UniversityData.Room> roomData = rooms.stream().map(room -> room.online()
-                ? new UniversityData.Room(roomId(room.id()), "Онлайн-площадка", null, true, null, List.of())
-                : new UniversityData.Room(roomId(room.id()), String.valueOf(1100 + 100 * (int) (room.id() % 4) + room.id()),
+                ? new UniversityData.Room(demoId("room-online"), demoName("Онлайн-площадка"), null, true, null, List.of())
+                : new UniversityData.Room(roomId(room.id()), demoName(String.valueOf(1100 + 100 * (int) (room.id() % 4) + room.id())),
                 BUILDINGS.get((int) (room.id() % BUILDINGS.size())), false, room.capacity(),
                 room.equipment().stream().map(e -> e == PROJECTOR ? "Проектор" : "Компьютеры").toList())).toList();
         List<UniversityData.Discipline> disciplines = exams.stream().map(Exam::discipline).distinct().sorted()
-                .map(d -> new UniversityData.Discipline(disciplineId(d), DISCIPLINES.get(d))).toList();
+                .map(d -> new UniversityData.Discipline(disciplineId(d), demoName(DISCIPLINES.get(d)))).toList();
         List<UniversityData.Teaching> teaching = exams.stream().map(exam -> new UniversityData.Teaching(
                 accountId(exam.teacher()), disciplineId(exam.discipline()), groupId(exam.group()))).distinct().toList();
         List<UniversityData.Supervision> supervision = supervisors.entrySet().stream().map(entry ->
@@ -252,26 +256,39 @@ public final class DatasetGenerator {
         boolean female = random.nextBoolean();
         String surname = pick(SURNAMES) + (female ? "а" : "");
         String patronymic = pick(PATRONYMICS) + (female ? "на" : "ич");
-        return new UniversityData.Account(accountId(id), accountId(id) + "@demo.slotwise.ru", surname,
+        String externalId = accountId(id);
+        return new UniversityData.Account(externalId, demoEmail(externalId), surname,
                 pick(female ? FEMALE_NAMES : MALE_NAMES), patronymic,
                 teacher ? UniversityData.Role.TEACHER : UniversityData.Role.STUDENT, ZONE.getId(), DEMO_PASSWORD_HASH);
     }
 
     private String accountId(long id) {
         // Locale.ROOT: with the default locale some JVMs print non-ASCII digits, and the import matches by these ids.
-        return String.format(Locale.ROOT, teachers.contains(id) ? "t%03d" : "s%04d", id);
+        return demoId(String.format(Locale.ROOT, teachers.contains(id) ? "t%03d" : "s%04d", id));
     }
 
-    private static String groupId(int group) {
-        return "P34" + (10 + group);
+    private String groupId(int group) {
+        return demoId("P34" + (10 + group));
     }
 
-    private static String roomId(long id) {
-        return "room-" + id;
+    private String roomId(long id) {
+        return demoId("room-" + id);
     }
 
-    private static String disciplineId(int discipline) {
-        return "discipline-" + (discipline + 1);
+    private String disciplineId(int discipline) {
+        return demoId("discipline-" + (discipline + 1));
+    }
+
+    private String demoId(String localId) {
+        return demoDatasetKey + "-" + localId;
+    }
+
+    private String demoName(String name) {
+        return name + " (" + demoDatasetKey + ")";
+    }
+
+    private static String demoEmail(String externalId) {
+        return externalId + "@demo.slotwise.ru";
     }
 
     /** Up to one class a day in an exam session, up to three in the tight profile. */
