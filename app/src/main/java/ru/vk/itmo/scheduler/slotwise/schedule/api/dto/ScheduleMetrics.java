@@ -83,9 +83,13 @@ public record ScheduleMetrics(
     }
 
     public ScheduleMetrics withUnassignedEvents(int count) {
+        if (count == unassignedEvents) {
+            return this;
+        }
+        var status = solveStatus == SolveStatus.OPTIMAL ? SolveStatus.FEASIBLE : solveStatus;
         return new ScheduleMetrics(penalty, hardViolations, count, gapsHours, commissionLoadRangeHours,
                 commissionLoadStandardDeviationHours, undesirableEvents, teacherRoomChanges, runtimeMillis,
-                bestBound, gap, solveStatus, scoreComponents);
+                null, null, status, scoreComponents);
     }
 
     private static BigDecimal hours(double minutes) {

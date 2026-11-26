@@ -148,16 +148,21 @@ class AssignmentEditApiTests {
 
         edit(true, 0, 0, move).andExpect(status().isOk())
                 .andExpect(jsonPath("$.variantVersion").value(0))
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(0))
                 .andExpect(jsonPath("$.metrics.hardViolations").value(1))
                 .andExpect(jsonPath("$.issues[0].eventIds[0]").value(otherEvent));
         edit(false, 0, 0, move).andExpect(status().isOk())
                 .andExpect(jsonPath("$.variantVersion").value(1))
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(0))
                 .andExpect(jsonPath("$.metrics.hardViolations").value(1))
                 .andExpect(jsonPath("$.metrics.solveStatus").value("NO_SOLUTION"))
                 .andExpect(jsonPath("$.issues[0].eventIds[0]").value(otherEvent));
         mvc.perform(get("/api/variants/" + variant).cookie(organizer))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.metrics.solveStatus").value("NO_SOLUTION"));
+                .andExpect(jsonPath("$.metrics.solveStatus").value("NO_SOLUTION"))
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(0))
+                .andExpect(jsonPath("$.metrics.hardViolations").value(1))
+                .andExpect(jsonPath("$.issues[0].eventIds[0]").value(otherEvent));
         mvc.perform(post("/api/variants/" + variant + "/publish").cookie(organizer).with(api.xsrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -227,6 +232,33 @@ class AssignmentEditApiTests {
         assertThat(startOf(variant)).isEqualTo(Instant.parse(THURSDAY));
         edit(false, 0, 0, move).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STALE_VARIANT_VERSION"));
+    }
+
+    @Test
+    void unassigningAnIncompleteEventUpdatesAllDraftCounters() throws Exception {
+        jdbc.update("update slotwise.event set complete = false where id = ?", event);
+        jdbc.update("update slotwise.planning_session set input_version = input_version + 1 where id = ?", f.session);
+        String unassigned = """
+                {"expectedVariantVersion": %d, "expectedAssignmentVersion": %d, "status": "UNASSIGNED",
+                 "startsAt": null, "endsAt": null, "roomId": null, "commissionMembers": [], "locked": false}
+                """;
+
+        edit(true, 0, 0, unassigned).andExpect(status().isOk())
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(1))
+                .andExpect(jsonPath("$.variantVersion").value(0));
+        mvc.perform(get("/api/variants/" + variant).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(0));
+
+        edit(false, 0, 0, unassigned).andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignment.status").value("UNASSIGNED"))
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(1));
+        mvc.perform(get("/api/variants/" + variant).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metrics.unassignedEvents").value(1));
+        mvc.perform(get(f.path("variants")).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].metrics.unassignedEvents").value(1));
     }
 
     private String assigned(String startsAt, String endsAt, boolean locked) {

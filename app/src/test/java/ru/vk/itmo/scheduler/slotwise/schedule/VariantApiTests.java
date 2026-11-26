@@ -271,6 +271,11 @@ class VariantApiTests {
         changeInput();
         String newAssignment = "$.assignments[?(@.eventId == " + added + ")]";
 
+        mvc.perform(get(f.path("variants")).cookie(organizer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(variant))
+                .andExpect(jsonPath("$.items[0].version").value(0))
+                .andExpect(jsonPath("$.items[0].metrics.unassignedEvents").value(1));
         mvc.perform(get("/api/variants/" + variant).cookie(organizer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.metrics.unassignedEvents").value(1))

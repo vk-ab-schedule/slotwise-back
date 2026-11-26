@@ -82,21 +82,46 @@ public class VariantService {
     private final Clock clock;
     private final ProblemLoader problems;
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResponse<VariantSummaryResponse> list(long sessionId, long user, int page, int size) {
         var session = sessions.findById(sessionId).filter(found -> found.getOrganizerId() == user)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "SESSION_NOT_FOUND", "Сессия не найдена"));
         Long total = jdbc.queryForObject("select count(*) from slotwise.schedule_variant where planning_session_id = :session",
                 Map.of("session", session.getId()), Long.class);
-        var items = jdbc.query(HEADER + """
+        var headers = jdbc.query(HEADER + """
                 where v.planning_session_id = :session order by v.created_at desc, v.id desc limit :size offset :offset
-                """, Map.of("session", sessionId, "size", size, "offset", (long) page * size), (rs, row) -> {
-            var header = header(rs);
-            return new VariantSummaryResponse(header.id(), header.sessionId(), header.jobId(), header.status(),
-                    header.algorithm(), header.baseVariantId(), header.inputVersion(), header.currentInputVersion(),
-                    header.stale(), header.incompleteData(), header.metrics(), header.version(), header.createdAt(),
-                    header.publishedAt());
-        });
+                """, Map.of("session", sessionId, "size", size, "offset", (long) page * size), (rs, row) -> header(rs));
+        var staleDraftIds = headers.stream().filter(header -> header.status() == ScheduleVariantStatus.DRAFT && header.stale())
+                .map(Header::id).toList();
+        var counts = staleDraftUnassignedCounts(staleDraftIds);
+        var items = headers.stream().map(header -> new VariantSummaryResponse(header.id(), header.sessionId(),
+                header.jobId(), header.status(), header.algorithm(), header.baseVariantId(), header.inputVersion(),
+                header.currentInputVersion(), header.stale(), header.incompleteData(),
+                header.metrics().withUnassignedEvents(counts.getOrDefault(header.id(), header.metrics().unassignedEvents())),
+                header.version(), header.createdAt(), header.publishedAt())).toList();
         return new PageResponse<>(items, Objects.requireNonNull(total), page, size);
+    }
+
+    private Map<Long, Integer> staleDraftUnassignedCounts(List<Long> variantIds) {
+        if (variantIds.isEmpty()) {
+            return Map.of();
+        }
+        return jdbc.query("""
+                select v.id, count(e.id) filter (where a.status = 'UNASSIGNED' or
+                    (a.event_id is null and e.complete
+                     and exists (select 1 from slotwise.event_participant p where p.event_id = e.id)))
+                from slotwise.schedule_variant v
+                left join slotwise.event e on e.planning_session_id = v.planning_session_id
+                left join slotwise.assignment a on a.schedule_variant_id = v.id and a.event_id = e.id
+                where v.id in (:variants)
+                group by v.id
+                """, Map.of("variants", variantIds), rs -> {
+            var counts = new HashMap<Long, Integer>();
+            while (rs.next()) {
+                counts.put(rs.getLong(1), Math.toIntExact(rs.getLong(2)));
+            }
+            return counts;
+        });
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -243,8 +268,9 @@ public class VariantService {
         }
         var params = Map.of("variant", variantId, "event", eventId);
         var assignments = readAssignments(header);
+        var missing = missingAssignments(header);
         var existing = assignments.stream().filter(a -> a.eventId() == eventId).findFirst();
-        var current = existing.or(() -> missingAssignments(header).stream().filter(a -> a.eventId() == eventId).findFirst())
+        var current = existing.or(() -> missing.stream().filter(a -> a.eventId() == eventId).findFirst())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ASSIGNMENT_NOT_FOUND", "Событие не найдено в варианте"));
         if (header.version() != request.expectedVariantVersion() || current.version() != request.expectedAssignmentVersion()) {
             throw stale();
@@ -265,7 +291,11 @@ public class VariantService {
         if (!editIssues.isEmpty()) {
             throw hardViolations("Правка нарушает жёсткие ограничения", editIssues);
         }
-        var metrics = editMetrics(header, problem, checked);
+        // Count the draft as it will look after the edit, including incomplete events that still have a row.
+        int unassigned = unassignedCount(otherAssignments)
+                + Math.toIntExact(missing.stream().filter(a -> a.eventId() != eventId).count())
+                + (request.status() == AssignmentStatus.UNASSIGNED ? 1 : 0);
+        var metrics = editMetrics(header, problem, checked).withUnassignedEvents(unassigned);
         var affected = new TreeSet<>(jdbc.queryForList("""
                 select account_id from slotwise.event_participant where event_id = :event
                 union select account_id from slotwise.assignment_commission_member
