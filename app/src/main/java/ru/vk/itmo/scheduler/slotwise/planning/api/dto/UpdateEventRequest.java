@@ -15,7 +15,7 @@ import ru.vk.itmo.scheduler.slotwise.eventtype.EventFormat;
 import java.util.List;
 import java.util.Set;
 
-@Schema(description = "Replace the complete editable event form. Dependencies must remain acyclic; business validation is implemented by B5.")
+@Schema(description = "Replace the complete editable event form. Dependencies must remain acyclic.")
 public record UpdateEventRequest(@NotNull @PositiveOrZero Long expectedVersion,
                                  @NotBlank @Size(max = 255) String title,
                                  @Schema(requiredMode = Schema.RequiredMode.REQUIRED, nullable = true) String description,

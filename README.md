@@ -49,6 +49,10 @@ SLOTWISE_ADMIN_EMAIL=admin@example.org SLOTWISE_ADMIN_PASSWORD=admin-password ./
 - **С БД из compose.** Запустите `SlotwiseBackApplication`. В конфигурации запуска рабочая папка должна быть `app` (`$MODULE_WORKING_DIR$`), иначе Spring не найдёт `compose.yaml`.
 - **С одноразовой БД.** Запустите `TestSlotwiseBackApplication` из `app/src/test`: БД поднимается через Testcontainers и после остановки удаляется.
 
+Для локального демо администратор может отправить `POST /api/admin/demo-data` с телом
+`{"dataset":"S","seed":42}`. Организатор этого набора — `demo-s-42-organizer@demo.slotwise.ru`,
+пароль — `demo-password`. Повтор той же пары профиля и seed не создаёт дублей, другая пара создаёт отдельный набор.
+
 ## Модули
 
 ```

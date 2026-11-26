@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import ru.vk.itmo.scheduler.slotwise.common.ApiException;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiIssue;
@@ -19,7 +20,6 @@ import ru.vk.itmo.scheduler.slotwise.domain.solver.SolveParams;
 import ru.vk.itmo.scheduler.slotwise.planning.CollectionStatus;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningSessionEntity;
 import ru.vk.itmo.scheduler.slotwise.planning.PlanningSessionRepository;
-import ru.vk.itmo.scheduler.slotwise.schedule.VariantStore;
 import ru.vk.itmo.scheduler.slotwise.solving.api.dto.PrecheckRequest;
 import ru.vk.itmo.scheduler.slotwise.solving.api.dto.PrecheckResponse;
 import ru.vk.itmo.scheduler.slotwise.solving.api.dto.SolveRequest;
@@ -62,7 +62,6 @@ public class SolvingService {
     private final SolverJobRepository jobs;
     private final ProblemLoader loader;
     private final SolverJobRunner runner;
-    private final VariantStore variants;
     private final JsonMapper json;
     private final Clock clock;
 
@@ -70,6 +69,7 @@ public class SolvingService {
         return SOLVERS;
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PrecheckResponse precheck(long sessionId, long user, PrecheckRequest request) {
         var session = ownSession(sessionId, user, request.expectedInputVersion(), false);
         List<ApiIssue> issues = new ArrayList<>(Prechecks.run(loader.load(session)).stream()
@@ -98,34 +98,41 @@ public class SolvingService {
         if (!SolverJobRunner.available(request.algorithm())) {
             throw new ApiException(HttpStatus.CONFLICT, "SOLVER_UNAVAILABLE", "Этот алгоритм пока недоступен");
         }
-        var input = loader.load(session);
-        var nonRespondents = loader.nonRespondents(sessionId);
-        var snapshot = snapshots.findByPlanningSessionIdAndInputVersion(sessionId, session.getInputVersion())
-                .orElseGet(() -> snapshots.save(InputSnapshotEntity.create(sessionId, session.getInputVersion(),
-                        SNAPSHOT.writeValueAsString(new Snapshot(collectionOpen(session) || !nonRespondents.isEmpty(),
-                                nonRespondents, input)))));
-        var parameters = new JobParameters(request.timeLimitSeconds(), request.seed(), request.baseVariantId());
+        var active = jobs.findFirstByPlanningSessionIdAndStatusIn(sessionId, ACTIVE);
+        if (active.isPresent()) {
+            return response(active.get());
+        }
+        Long baseVariantId = request.baseVariantId();
+        Long baseVariantVersion = baseVariantId == null ? null : loader.lockVariantVersion(baseVariantId, sessionId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "VARIANT_NOT_FOUND",
+                        "Базовый вариант не найден в этой сессии"));
+        var parameters = new JobParameters(request.timeLimitSeconds(), request.seed(), baseVariantId, baseVariantVersion);
         String parametersJson = json.writeValueAsString(parameters);
-        var existing = jobs.findSameRequest(snapshot.getId(), request.algorithm().name(), parametersJson)
-                .or(() -> jobs.findFirstByPlanningSessionIdAndStatusIn(sessionId, ACTIVE));
-        if (existing.isPresent()) {
-            return response(existing.get());
+        var snapshot = snapshots.findByPlanningSessionIdAndInputVersion(sessionId, session.getInputVersion());
+        var completed = snapshot.flatMap(value ->
+                jobs.findCompletedRequest(value.getId(), request.algorithm().name(), parametersJson));
+        if (completed.isPresent()) {
+            return response(completed.get());
         }
-        if (request.baseVariantId() != null && !loader.variantOf(request.baseVariantId(), sessionId)) {
-            throw new ApiException(HttpStatus.NOT_FOUND, "VARIANT_NOT_FOUND", "Базовый вариант не найден в этой сессии");
-        }
-        var problem = request.baseVariantId() == null ? input : loader.withBaseline(input, request.baseVariantId());
+        var input = loader.load(session);
+        var problem = baseVariantId == null ? input : loader.withBaseline(input, baseVariantId, true);
+        var nonRespondents = loader.nonRespondents(sessionId);
+        boolean incompleteData = collectionOpen(session) || !nonRespondents.isEmpty();
+        long snapshotId = snapshot.orElseGet(() -> snapshots.save(InputSnapshotEntity.create(
+                sessionId, session.getInputVersion(),
+                SNAPSHOT.writeValueAsString(new Snapshot(incompleteData, nonRespondents, input))))).getId();
 
         var job = new SolverJobEntity();
         job.setPlanningSessionId(sessionId);
-        job.setInputSnapshotId(snapshot.getId());
+        job.setInputSnapshotId(snapshotId);
+        job.setIncompleteData(incompleteData);
         job.setAlgorithm(request.algorithm());
         job.setParameters(parametersJson);
         job.setStatus(SolverJobStatus.QUEUED);
         job.setRequestedBy(user);
         jobs.saveAndFlush(job);
-        runner.submitAfterCommit(new SolverJobRunner.Run(job.getId(), sessionId, snapshot.getId(),
-                request.baseVariantId(), request.algorithm(), problem,
+        runner.submitAfterCommit(new SolverJobRunner.Run(job.getId(), sessionId, snapshotId,
+                baseVariantId, request.algorithm(), problem,
                 new SolveParams(Duration.ofSeconds(request.timeLimitSeconds()), request.seed())));
         return response(job);
     }
@@ -155,9 +162,11 @@ public class SolvingService {
             case QUEUED -> queuePosition = Math.toIntExact(
                     jobs.countByStatusAndIdLessThan(SolverJobStatus.QUEUED, job.getId()) + 1);
             case RUNNING -> {
+                long elapsedMillis = Duration.between(job.getStartedAt(), clock.instant()).toMillis();
+                long limitMillis = Duration.ofSeconds(parameters.timeLimitSeconds()).toMillis();
+                progress = Math.clamp((double) elapsedMillis / limitMillis, 0.0, 1.0);
                 var best = runner.progress(job.getId());
                 if (best.isPresent()) {
-                    progress = Math.min(1, best.get().elapsed().toMillis() / (parameters.timeLimitSeconds() * 1000.0));
                     var bound = best.get().penaltyBound();
                     quality = new SolverJobResponse.Quality(best.get().best().unassigned(), best.get().best().penalty(),
                             bound.isPresent() ? bound.getAsLong() : null);
@@ -165,12 +174,12 @@ public class SolvingService {
             }
             case COMPLETED -> {
                 progress = 1.0;
-                var result = variants.resultOf(job.getId());
-                solveStatus = result.map(VariantStore.Result::solveStatus).orElse(SolveStatus.NO_SOLUTION);
-                if (result.isPresent()) {
-                    resultId = result.get().variantId();
-                    quality = new SolverJobResponse.Quality(result.get().unassignedEvents(), result.get().penalty(),
-                            result.get().bestBound());
+                solveStatus = SolveStatus.NO_SOLUTION;
+                if (job.getCompletedResult() != null) {
+                    var result = json.readValue(job.getCompletedResult(), SolverJobEntity.CompletedResult.class);
+                    solveStatus = result.solveStatus();
+                    resultId = result.variantId();
+                    quality = new SolverJobResponse.Quality(result.unassignedEvents(), result.penalty(), result.bestBound());
                 }
             }
             case FAILED, CANCELLED -> error = new SolverJobResponse.Failure(job.getErrorMessage(),
@@ -213,7 +222,7 @@ public class SolvingService {
      * Parameters stored with a job; equal parameters of the same input mean the same calculation.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record JobParameters(int timeLimitSeconds, long seed, Long baseVariantId) {
+    record JobParameters(int timeLimitSeconds, long seed, Long baseVariantId, Long baseVariantVersion) {
     }
 
     @JsonIgnoreProperties({"peopleById", "roomsById", "eventsById", "pinnedByEvent"})
