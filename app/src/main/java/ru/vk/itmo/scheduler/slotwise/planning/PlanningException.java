@@ -1,16 +1,11 @@
 package ru.vk.itmo.scheduler.slotwise.planning;
 
-import lombok.Getter;
 import org.springframework.http.HttpStatus;
+import ru.vk.itmo.scheduler.slotwise.common.ApiException;
 
-@Getter
-public class PlanningException extends RuntimeException {
-    private final HttpStatus status;
-    private final String code;
+public class PlanningException extends ApiException {
 
     public PlanningException(HttpStatus status, String code, String message) {
-        super(message);
-        this.status = status;
-        this.code = code;
+        super(status, code, message);
     }
 }

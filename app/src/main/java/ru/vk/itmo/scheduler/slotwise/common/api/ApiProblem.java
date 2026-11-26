@@ -17,5 +17,7 @@ public record ApiProblem(
         @NotNull @Schema(type = "string", format = "uri-reference") URI instance,
         @NotNull String code,
         @Schema(description = "Present for field validation errors") List<FieldViolation> fieldErrors,
-        @Schema(description = "Present when a domain validator supplies diagnostics") List<ApiIssue> issues) {
+        @Schema(description = "Present when a domain validator supplies diagnostics") List<ApiIssue> issues,
+        @Schema(description = "Present for EMAIL_TAKEN and EXTERNAL_ID_TAKEN: the account that already has the value")
+        Long accountId) {
 }

@@ -21,7 +21,6 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import ru.vk.itmo.scheduler.slotwise.common.api.FieldViolation;
-import ru.vk.itmo.scheduler.slotwise.planning.PlanningException;
 
 import java.util.Objects;
 
@@ -66,9 +65,11 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return super.handleExceptionInternal(e, p, headers, status, request);
     }
 
-    @ExceptionHandler(PlanningException.class)
-    ProblemDetail handlePlanning(PlanningException e) {
-        return problem(e.getStatus(), e.getCode(), e.getMessage());
+    @ExceptionHandler(ApiException.class)
+    ProblemDetail handleApi(ApiException e) {
+        ProblemDetail problem = problem(e.getStatus(), e.getCode(), e.getMessage());
+        e.getProperties().forEach(problem::setProperty);
+        return problem;
     }
 
     @ExceptionHandler(OptimisticLockingFailureException.class)

@@ -30,6 +30,49 @@ import java.util.Set;
 
 @Configuration(proxyBeanMethods = false)
 public class OpenApiConfiguration {
+    /**
+     * Implemented operations, they do not document the 501 contract stub. One per line in alphabetical order,
+     * so that parallel PRs do not conflict here.
+     */
+    private static final Set<String> IMPLEMENTED = Set.of(
+            "changeCollectionDeadline",
+            "closeCollection",
+            "createAccount",
+            "createSession",
+            "createSessionEvents",
+            "deleteSessionEvent",
+            "generateUniversityDemoData",
+            "getAccount",
+            "getCollection",
+            "getCommissionPool",
+            "getCurrentUser",
+            "getEventType",
+            "getMyBusyCalendar",
+            "getSession",
+            "getSessionEvent",
+            "getSessionParticipants",
+            "getSessionRooms",
+            "getSessionRules",
+            "importUniversityData",
+            "listAccountRoleImpact",
+            "listAccounts",
+            "listEventTypes",
+            "listSessionEvents",
+            "listSessions",
+            "login",
+            "replaceCommissionPool",
+            "replaceMyBusyCalendar",
+            "replaceSessionParticipants",
+            "replaceSessionRooms",
+            "replaceSessionRules",
+            "setAccountEnabled",
+            "setAccountPassword",
+            "setAccountRole",
+            "submitMyBusyCalendar",
+            "updateAccount",
+            "updateSession",
+            "updateSessionEvent");
+
     @Bean
     OpenApiCustomizer nullableReferences() {
         return api -> api.getComponents().getSchemas().values().forEach(OpenApiConfiguration::normalizeNullableReferences);
@@ -125,14 +168,7 @@ public class OpenApiConfiguration {
                         "Returns INVALID_SCHEDULE_RANGE when from >= to. Missing or malformed date parameters "
                                 + "return INVALID_REQUEST."));
             }
-            if (List.of("login", "getCurrentUser", "getMyBusyCalendar", "replaceMyBusyCalendar",
-                    "submitMyBusyCalendar", "getCollection", "closeCollection", "changeCollectionDeadline",
-                    "getSessionRules", "replaceSessionRules", "listSessions", "getSession", "createSession", "updateSession",
-                    "getSessionParticipants", "replaceSessionParticipants", "getCommissionPool", "replaceCommissionPool",
-                    "getSessionRooms", "replaceSessionRooms", "listSessionEvents", "getSessionEvent", "createSessionEvents",
-                    "updateSessionEvent", "deleteSessionEvent", "listEventTypes", "getEventType",
-                    "importUniversityData", "generateUniversityDemoData")
-                    .contains(operation.getOperationId())) {
+            if (IMPLEMENTED.contains(operation.getOperationId())) {
                 operation.getResponses().remove("501");
             }
             RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(), RequestMapping.class);

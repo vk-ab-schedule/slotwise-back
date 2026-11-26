@@ -96,9 +96,6 @@ class ImportStore {
                         role = ?, time_zone = ?, password_hash = ?, version = version + 1, updated_at = now()
                     where id = ?
                     """, fields);
-            if (previous.value.role() != a.role() || !Objects.equals(previous.value.passwordHash(), a.passwordHash())) {
-                jdbc.update("delete from slotwise.spring_session where principal_name = ?", row.id.toString());
-            }
         }
     }
 
