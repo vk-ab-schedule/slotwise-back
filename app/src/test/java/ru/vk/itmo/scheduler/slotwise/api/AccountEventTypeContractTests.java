@@ -7,6 +7,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 
 import java.util.List;
@@ -44,34 +45,36 @@ class AccountEventTypeContractTests extends ApiContractTestBase {
     private static final String UPDATE_EVENT_TYPE = CREATE_EVENT_TYPE.replace("\"name\":",
             "\"expectedVersion\":0,\"name\":");
 
-    @ParameterizedTest(name = "{0} {1} returns the contract stub")
+    @ParameterizedTest(name = "{0} {1} returns {3}")
     @MethodSource("validOperations")
-    void validOperationsReturnNotImplemented(String method, String path, String body) throws Exception {
+    void validOperationsReturnExpectedStatus(String method, String path, String body, HttpStatus expectedStatus)
+            throws Exception {
         var operation = request(HttpMethod.valueOf(method), path);
         if (body != null) {
             operation.contentType(MediaType.APPLICATION_JSON).content(body);
         }
-        mvc.perform(operation)
-                .andExpect(status().isNotImplemented())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(jsonPath("$.status").value(501))
-                .andExpect(jsonPath("$.code").value("NOT_IMPLEMENTED"));
+        var result = mvc.perform(operation).andExpect(status().is(expectedStatus.value()));
+        if (expectedStatus == HttpStatus.NOT_IMPLEMENTED) {
+            result.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.status").value(501))
+                    .andExpect(jsonPath("$.code").value("NOT_IMPLEMENTED"));
+        }
     }
 
     static Stream<Arguments> validOperations() {
         return Stream.of(
-                Arguments.of("GET", "/api/admin/accounts", null),
-                Arguments.of("POST", "/api/admin/accounts", CREATE_ACCOUNT),
-                Arguments.of("GET", "/api/admin/accounts/1", null),
-                Arguments.of("PATCH", "/api/admin/accounts/1", UPDATE_PROFILE),
-                Arguments.of("PUT", "/api/admin/accounts/1/role", "{\"expectedVersion\":0,\"role\":\"ADMIN\"}"),
-                Arguments.of("PUT", "/api/admin/accounts/1/enabled", "{\"expectedVersion\":0,\"enabled\":false}"),
+                Arguments.of("GET", "/api/admin/accounts", null, HttpStatus.OK),
+                Arguments.of("POST", "/api/admin/accounts", CREATE_ACCOUNT, HttpStatus.CREATED),
+                Arguments.of("GET", "/api/admin/accounts/1", null, HttpStatus.OK),
+                Arguments.of("PATCH", "/api/admin/accounts/1", UPDATE_PROFILE, HttpStatus.OK),
+                Arguments.of("PUT", "/api/admin/accounts/1/role", "{\"expectedVersion\":0,\"role\":\"ADMIN\"}", HttpStatus.OK),
+                Arguments.of("PUT", "/api/admin/accounts/1/enabled", "{\"expectedVersion\":0,\"enabled\":false}", HttpStatus.OK),
                 Arguments.of("PUT", "/api/admin/accounts/1/password",
-                        "{\"expectedVersion\":0,\"password\":\"" + "x".repeat(128) + "\"}"),
-                Arguments.of("GET", "/api/event-types", null),
-                Arguments.of("POST", "/api/event-types", CREATE_EVENT_TYPE),
-                Arguments.of("PUT", "/api/event-types/1", UPDATE_EVENT_TYPE),
-                Arguments.of("DELETE", "/api/event-types/1?expectedVersion=0", null));
+                        "{\"expectedVersion\":0,\"password\":\"" + "x".repeat(72) + "\"}", HttpStatus.NO_CONTENT),
+                Arguments.of("GET", "/api/event-types", null, HttpStatus.OK),
+                Arguments.of("POST", "/api/event-types", CREATE_EVENT_TYPE, HttpStatus.NOT_IMPLEMENTED),
+                Arguments.of("PUT", "/api/event-types/1", UPDATE_EVENT_TYPE, HttpStatus.NOT_IMPLEMENTED),
+                Arguments.of("DELETE", "/api/event-types/1?expectedVersion=0", null, HttpStatus.NOT_IMPLEMENTED));
     }
 
     @Test
@@ -186,7 +189,7 @@ class AccountEventTypeContractTests extends ApiContractTestBase {
                 Arguments.of("password", "{\"expectedVersion\":0,\"password\":null}"),
                 Arguments.of("password", "{\"expectedVersion\":0,\"password\":\" \"}"),
                 Arguments.of("password", "{\"expectedVersion\":0,\"password\":\"1234567\"}"),
-                Arguments.of("password", "{\"expectedVersion\":0,\"password\":\"" + "x".repeat(129) + "\"}"));
+                Arguments.of("password", "{\"expectedVersion\":0,\"password\":\"" + "x".repeat(73) + "\"}"));
     }
 
     @ParameterizedTest(name = "template rejects {0}")
@@ -261,6 +264,8 @@ class AccountEventTypeContractTests extends ApiContractTestBase {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.paths['/api/admin/accounts'].post.responses['201']").exists())
                 .andExpect(jsonPath("$.paths['/api/admin/accounts/{id}/password'].put.responses['204']").exists())
+                .andExpect(jsonPath("$.paths['/api/admin/accounts/{id}/role-impact'].get.responses['200']").exists())
+                .andExpect(jsonPath("$.paths['/api/admin/accounts/{id}/role-impact'].get.responses['501']").doesNotExist())
                 .andExpect(jsonPath("$.paths['/api/event-types'].post.responses['201']").exists())
                 .andExpect(jsonPath("$.paths['/api/event-types/{id}'].delete.responses['204']").exists())
                 .andExpect(jsonPath("$.components.schemas.AccountResponse.properties.passwordHash").doesNotExist())
@@ -268,7 +273,7 @@ class AccountEventTypeContractTests extends ApiContractTestBase {
                 .andExpect(jsonPath("$.components.schemas.CreateAccountRequest.properties.passwordHash").doesNotExist())
                 .andExpect(jsonPath("$.components.schemas.CreateAccountRequest.properties.password").doesNotExist())
                 .andExpect(jsonPath("$.components.schemas.SetAccountPasswordRequest.properties.password.writeOnly").value(true))
-                .andExpect(jsonPath("$.components.schemas.SetAccountPasswordRequest.properties.password.maxLength").value(128))
+                .andExpect(jsonPath("$.components.schemas.SetAccountPasswordRequest.properties.password.maxLength").value(72))
                 .andExpect(jsonPath("$.components.schemas.SetAccountPasswordRequest.properties.password.minLength").value(8))
                 .andExpect(jsonPath("$.components.schemas.CreateEventTypeRequest.properties.defaultDurationMinutes.multipleOf").value(5))
                 .andExpect(jsonPath("$.components.schemas.UpdateEventTypeRequest.properties.defaultDurationMinutes.multipleOf").value(5))

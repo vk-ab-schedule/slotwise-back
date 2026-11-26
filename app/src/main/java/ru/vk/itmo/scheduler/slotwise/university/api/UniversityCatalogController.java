@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,9 +15,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import ru.vk.itmo.scheduler.slotwise.account.AccountRole;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiPaths;
-import ru.vk.itmo.scheduler.slotwise.common.api.ContractStub;
 import ru.vk.itmo.scheduler.slotwise.common.api.PageResponse;
 import ru.vk.itmo.scheduler.slotwise.common.api.PersonSummary;
+import ru.vk.itmo.scheduler.slotwise.university.UniversityCatalogService;
 import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityDisciplineResponse;
 import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityEquipmentResponse;
 import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityGroupResponse;
@@ -28,10 +29,12 @@ import ru.vk.itmo.scheduler.slotwise.university.api.dto.UniversityTimetableEntry
 import java.time.Instant;
 
 @RestController
+@RequiredArgsConstructor
 @RequestMapping(value = ApiPaths.UNIVERSITY, produces = MediaType.APPLICATION_JSON_VALUE)
 @PreAuthorize("hasAnyRole('ADMIN', 'ORGANIZER')")
 @Tag(name = "University catalogs", description = "ADMIN and ORGANIZER; public person summaries omit email and credentials.")
 public class UniversityCatalogController {
+    private final UniversityCatalogService catalog;
 
     @GetMapping("/people")
     @Operation(operationId = "listUniversityPeople", summary = "List people")
@@ -42,7 +45,7 @@ public class UniversityCatalogController {
             @RequestParam(name = "role", required = false) AccountRole role,
             @RequestParam(name = "groupId", required = false) @Min(1) Long groupId,
             @RequestParam(name = "enabled", required = false) Boolean enabled) {
-        throw ContractStub.notImplemented();
+        return catalog.listPeople(page, size, search, role, groupId, enabled);
     }
 
     @GetMapping("/groups")
@@ -53,7 +56,7 @@ public class UniversityCatalogController {
             @RequestParam(name = "search", required = false) @Size(max = 255) String search,
             @RequestParam(name = "studentId", required = false) @Min(1) Long studentId,
             @RequestParam(name = "active", required = false) Boolean active) {
-        throw ContractStub.notImplemented();
+        return catalog.listGroups(page, size, search, studentId, active);
     }
 
     @GetMapping("/rooms")
@@ -67,7 +70,7 @@ public class UniversityCatalogController {
             @RequestParam(name = "online", required = false) Boolean online,
             @RequestParam(name = "building", required = false) @Size(max = 255) String building,
             @RequestParam(name = "active", required = false) Boolean active) {
-        throw ContractStub.notImplemented();
+        return catalog.listRooms(page, size, search, equipmentId, minCapacity, online, building, active);
     }
 
     @GetMapping("/disciplines")
@@ -77,7 +80,7 @@ public class UniversityCatalogController {
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(name = "search", required = false) @Size(max = 255) String search,
             @RequestParam(name = "active", required = false) Boolean active) {
-        throw ContractStub.notImplemented();
+        return catalog.listDisciplines(page, size, search, active);
     }
 
     @GetMapping("/equipment")
@@ -86,7 +89,7 @@ public class UniversityCatalogController {
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(name = "search", required = false) @Size(max = 255) String search) {
-        throw ContractStub.notImplemented();
+        return catalog.listEquipment(page, size, search);
     }
 
     @GetMapping("/teachings")
@@ -98,7 +101,7 @@ public class UniversityCatalogController {
             @RequestParam(name = "teacherId", required = false) @Min(1) Long teacherId,
             @RequestParam(name = "disciplineId", required = false) @Min(1) Long disciplineId,
             @RequestParam(name = "groupId", required = false) @Min(1) Long groupId) {
-        throw ContractStub.notImplemented();
+        return catalog.listTeachings(page, size, search, teacherId, disciplineId, groupId);
     }
 
     @GetMapping("/supervisions")
@@ -109,11 +112,13 @@ public class UniversityCatalogController {
             @RequestParam(name = "search", required = false) @Size(max = 255) String search,
             @RequestParam(name = "studentId", required = false) @Min(1) Long studentId,
             @RequestParam(name = "supervisorId", required = false) @Min(1) Long supervisorId) {
-        throw ContractStub.notImplemented();
+        return catalog.listSupervisions(page, size, search, studentId, supervisorId);
     }
 
     @GetMapping("/timetable")
-    @Operation(operationId = "listUniversityTimetable", summary = "List timetable")
+    @Operation(operationId = "listUniversityTimetable", summary = "List timetable",
+            description = "Returns entries overlapping the requested interval [startsAt, endsAt). "
+                    + "Each boundary is optional. When both are present, startsAt must precede endsAt.")
     public PageResponse<UniversityTimetableEntryResponse> listUniversityTimetable(
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size,
@@ -122,54 +127,54 @@ public class UniversityCatalogController {
             @RequestParam(name = "roomId", required = false) @Min(1) Long roomId,
             @RequestParam(name = "startsAt", required = false) Instant startsAt,
             @RequestParam(name = "endsAt", required = false) Instant endsAt) {
-        throw ContractStub.notImplemented();
+        return catalog.listTimetable(page, size, search, accountId, roomId, startsAt, endsAt);
     }
 
     @GetMapping("/groups/{id}")
     @Operation(operationId = "getUniversityGroup", summary = "Get groups record")
     public UniversityGroupResponse getUniversityGroup(
             @PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+        return catalog.getGroup(id);
     }
 
     @GetMapping("/rooms/{id}")
     @Operation(operationId = "getUniversityRoom", summary = "Get rooms record")
     public UniversityRoomResponse getUniversityRoom(
             @PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+        return catalog.getRoom(id);
     }
 
     @GetMapping("/disciplines/{id}")
     @Operation(operationId = "getUniversityDiscipline", summary = "Get disciplines record")
     public UniversityDisciplineResponse getUniversityDiscipline(
             @PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+        return catalog.getDiscipline(id);
     }
 
     @GetMapping("/equipment/{id}")
     @Operation(operationId = "getUniversityEquipment", summary = "Get equipment record")
     public UniversityEquipmentResponse getUniversityEquipment(
             @PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+        return catalog.getEquipment(id);
     }
 
     @GetMapping("/timetable/{id}")
     @Operation(operationId = "getUniversityTimetableEntry", summary = "Get timetable record")
     public UniversityTimetableEntryResponse getUniversityTimetableEntry(
             @PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+        return catalog.getTimetableEntry(id);
     }
 
     @GetMapping("/people/{id}")
     @Operation(operationId = "getUniversityPerson", summary = "Get university person")
     public PersonSummary getUniversityPerson(@PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+        return catalog.getPerson(id);
     }
 
     @GetMapping("/teachings/{id}")
     @Operation(operationId = "getUniversityTeaching", summary = "Get university teaching")
     public UniversityTeachingResponse getUniversityTeaching(@PathVariable("id") @Min(1) long id) {
-        throw ContractStub.notImplemented();
+        return catalog.getTeaching(id);
     }
 
     @GetMapping("/supervisions/{studentId}/{supervisorId}")
@@ -177,6 +182,6 @@ public class UniversityCatalogController {
     public UniversitySupervisionResponse getUniversitySupervision(
             @PathVariable("studentId") @Min(1) long studentId,
             @PathVariable("supervisorId") @Min(1) long supervisorId) {
-        throw ContractStub.notImplemented();
+        return catalog.getSupervision(studentId, supervisorId);
     }
 }

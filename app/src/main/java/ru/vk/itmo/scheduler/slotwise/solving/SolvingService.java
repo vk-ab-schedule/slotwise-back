@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import ru.vk.itmo.scheduler.slotwise.common.ApiException;
 import ru.vk.itmo.scheduler.slotwise.common.api.ApiIssue;
@@ -45,6 +46,7 @@ public class SolvingService {
         return SOLVERS;
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PrecheckResponse precheck(long sessionId, long user, PrecheckRequest request) {
         var session = ownSession(sessionId, user, request.expectedInputVersion());
         List<ApiIssue> issues = new ArrayList<>(Prechecks.run(loader.load(session)).stream()

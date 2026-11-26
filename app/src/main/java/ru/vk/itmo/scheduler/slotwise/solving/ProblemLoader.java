@@ -78,12 +78,11 @@ public class ProblemLoader {
                 """, params);
         var events = jdbc.query("""
                 select e.id, e.duration_minutes, e.format, e.commission_size, e.requires_chair, e.preparation_days,
-                       t.granularity
+                       coalesce(e.granularity, t.granularity)
                 from slotwise.event e join slotwise.event_type t on t.id = e.event_type_id
                 where e.planning_session_id = :session and e.complete
                 """, params, (rs, row) -> event(rs, grid, participants, equipment, supervisors, poolIds)).stream()
-                // An event longer than the whole period cannot be placed anywhere, the grid rejects it.
-                .filter(event -> !event.participants().isEmpty() && event.duration() <= grid.slotCount())
+                .filter(event -> !event.participants().isEmpty())
                 .toList();
 
         Set<Long> people = new HashSet<>(poolIds);
@@ -94,8 +93,10 @@ public class ProblemLoader {
                 join slotwise.session_participant p on p.account_id = t.account_id and p.planning_session_id = :session
                 where t.ends_at > :from and t.starts_at < :to
                 union all
-                select account_id, starts_at, ends_at, importance from slotwise.busy_interval
-                where planning_session_id = :session
+                select b.account_id, b.starts_at, b.ends_at, b.importance from slotwise.busy_interval b
+                join slotwise.session_participant p
+                  on p.planning_session_id = b.planning_session_id and p.account_id = b.account_id
+                where b.planning_session_id = :session and p.response_status = 'SUBMITTED'
                 """, params, rs -> {
             long person = rs.getLong(1);
             var kind = Person.Busy.Kind.valueOf(rs.getString(4));
@@ -148,12 +149,13 @@ public class ProblemLoader {
         ZoneId zone = ZoneId.of(session.getTimeZone());
         long slotSeconds = SLOT_MINUTES * 60L;
         Instant origin = Instant.ofEpochSecond(Math.floorDiv(session.getStartsAt().getEpochSecond(), slotSeconds) * slotSeconds);
-        int slots = Math.toIntExact(-Math.floorDiv(-Duration.between(origin, session.getEndsAt()).toSeconds(), slotSeconds));
+        Duration span = Duration.between(origin, session.getEndsAt());
+        int slots = Math.toIntExact(span.plusSeconds(slotSeconds).minusNanos(1).getSeconds() / slotSeconds);
         var withoutPeriods = new TimeGrid(origin, zone, SLOT_MINUTES, slots, List.of());
         Set<Integer> weekdays = workingDays.findByPlanningSessionId(session.getId()).stream()
                 .map(day -> day.getDayOfWeek().intValue()).collect(Collectors.toSet());
         List<SlotRange> periods = normalizer.workingWindows(session, weekdays).stream()
-                .flatMap(window -> withoutPeriods.covering(window.start(), window.end()).stream())
+                .flatMap(window -> withoutPeriods.containedIn(window.start(), window.end()).stream())
                 .toList();
         return new TimeGrid(origin, zone, SLOT_MINUTES, slots, periods);
     }
