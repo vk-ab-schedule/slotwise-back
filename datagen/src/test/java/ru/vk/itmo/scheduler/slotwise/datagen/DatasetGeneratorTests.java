@@ -43,7 +43,8 @@ class DatasetGeneratorTests {
             UniversityData arabic = DatasetGenerator.university(DatasetProfile.S, 42);
             Locale.setDefault(Locale.US);
             assertThat(arabic).isEqualTo(DatasetGenerator.university(DatasetProfile.S, 42));
-            assertThat(arabic.accounts()).extracting(UniversityData.Account::externalId).contains("t001", "s0011");
+            assertThat(arabic.accounts()).extracting(UniversityData.Account::externalId)
+                    .contains("demo-s-42-t001", "demo-s-42-s0011");
         } finally {
             Locale.setDefault(saved);
         }
@@ -53,6 +54,19 @@ class DatasetGeneratorTests {
     void differentSeedsGiveDifferentDatasets() {
         assertThat(DatasetGenerator.problem(DatasetProfile.M, 1).people())
                 .isNotEqualTo(DatasetGenerator.problem(DatasetProfile.M, 2).people());
+    }
+
+    @Test
+    void onlinePlatformsBelongToTheirOwnDemoProfile() {
+        var small = DatasetGenerator.university(DatasetProfile.S, 42).rooms();
+        var medium = DatasetGenerator.university(DatasetProfile.M, 42).rooms();
+
+        assertThat(small.stream().filter(UniversityData.Room::online).map(UniversityData.Room::externalId).toList())
+                .containsExactly("demo-s-42-room-online");
+        assertThat(medium.stream().filter(UniversityData.Room::online).map(UniversityData.Room::externalId).toList())
+                .containsExactly("demo-m-42-room-online");
+        assertThat(Stream.concat(small.stream(), medium.stream()).filter(room -> !room.online()))
+                .noneMatch(room -> room.externalId().endsWith("-room-online"));
     }
 
     @ParameterizedTest
