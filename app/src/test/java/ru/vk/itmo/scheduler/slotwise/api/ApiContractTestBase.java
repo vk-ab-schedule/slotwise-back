@@ -1,0 +1,89 @@
+package ru.vk.itmo.scheduler.slotwise.api;
+
+import org.mockito.Mockito;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import ru.vk.itmo.scheduler.slotwise.eventtype.EventTypeCatalog;
+import ru.vk.itmo.scheduler.slotwise.planning.PlanningEventService;
+import ru.vk.itmo.scheduler.slotwise.planning.SessionPreparationService;
+import ru.vk.itmo.scheduler.slotwise.planning.PlanningAvailabilityService;
+import ru.vk.itmo.scheduler.slotwise.auth.AccountPrincipal;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.web.servlet.MockMvc;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import ru.vk.itmo.scheduler.slotwise.account.AccountRepository;
+import ru.vk.itmo.scheduler.slotwise.schedule.VariantService;
+import ru.vk.itmo.scheduler.slotwise.schedule.VariantStore;
+import ru.vk.itmo.scheduler.slotwise.solving.ProblemLoader;
+import ru.vk.itmo.scheduler.slotwise.solving.SolverJobRunner;
+import ru.vk.itmo.scheduler.slotwise.solving.SolvingService;
+import ru.vk.itmo.scheduler.slotwise.university.ImportService;
+import ru.vk.itmo.scheduler.slotwise.university.UniversityCatalogService;
+import ru.vk.itmo.scheduler.slotwise.account.AccountService;
+
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+
+/**
+ * MVC/security contract boundary; real persistence and login have separate integration tests.
+ */
+@SpringBootTest(properties = {
+        "spring.docker.compose.enabled=false",
+        "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
+                + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"
+})
+@AutoConfigureMockMvc
+public abstract class ApiContractTestBase {
+    @MockitoBean
+    private AccountRepository accounts;
+    @MockitoBean
+    protected AccountService accountService;
+    @MockitoBean
+    protected SolvingService solvingService;
+    @MockitoBean
+    private ProblemLoader problemLoader;
+    @MockitoBean
+    private SolverJobRunner solverJobRunner;
+    @MockitoBean
+    private VariantStore variantStore;
+    @MockitoBean
+    protected VariantService variantService;
+    @MockitoBean
+    protected PlanningAvailabilityService availability;
+    @MockitoBean
+    private JdbcClient jdbc;
+    @MockitoBean
+    private SessionPreparationService sessions;
+    @MockitoBean
+    private PlanningEventService events;
+    @MockitoBean
+    private EventTypeCatalog eventTypes;
+    @MockitoBean
+    protected ImportService universityImport;
+    @Autowired
+    private WebApplicationContext context;
+    protected MockMvc mvc;
+    @MockitoBean
+    private UniversityCatalogService universityCatalog;
+
+    @BeforeEach
+    void authenticatedContractClient() {
+        var principal = Mockito.mock(AccountPrincipal.class);
+        Mockito.when(principal.getAccountId()).thenReturn(1L);
+        var authentication = UsernamePasswordAuthenticationToken.authenticated(
+                principal, null, AuthorityUtils.createAuthorityList(
+                        "ROLE_ADMIN", "ROLE_ORGANIZER", "ROLE_TEACHER", "ROLE_STUDENT"));
+        mvc = MockMvcBuilders.webAppContextSetup(context)
+                .defaultRequest(get("/").with(SecurityMockMvcRequestPostProcessors.authentication(authentication)).with(csrf()))
+                .apply(springSecurity()).build();
+    }
+}

@@ -1,0 +1,23 @@
+package ru.vk.itmo.scheduler.slotwise.account.api.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
+
+public record SetAccountPasswordRequest(
+        @NotNull @PositiveOrZero Long expectedVersion,
+        @NotBlank @Size(min = SetAccountPasswordRequest.MIN_LENGTH, max = SetAccountPasswordRequest.MAX_UTF8_BYTES)
+        @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+        @Schema(accessMode = Schema.AccessMode.WRITE_ONLY, format = "password",
+                description = "At most 72 bytes in UTF-8.") String password) {
+    public static final int MIN_LENGTH = 8;
+    public static final int MAX_UTF8_BYTES = 72;
+
+    @Override
+    public String toString() {
+        return "SetAccountPasswordRequest[expectedVersion=" + expectedVersion + ", password=***]";
+    }
+}
